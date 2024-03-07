@@ -182,35 +182,35 @@ func (kc *CassandraContext) updateSubmissions(submissions []Submission) error {
 	return nil
 }
 
-func (kc *CassandraContext) updateSubmissionsBatch(submissions []Submission) error {
-	batch := kc.Session.NewBatch(gocql.LoggedBatch) // Use gocql.UnloggedBatch for unlogged batches
+// func (kc *CassandraContext) updateSubmissionsBatch(submissions []Submission) error {
+// 	batch := kc.Session.NewBatch(gocql.LoggedBatch) // Use gocql.UnloggedBatch for unlogged batches
 
-	// Define your dummy values here
-	dummyStateHash := "dummy_state_hash"
-	dummyParent := "dummy_parent"
-	dummyHeight := 123
-	dummySlot := 456
-	dummyValidationError := "dummy_error"
-	dummyVerified := true
+// 	// Define your dummy values here
+// 	dummyStateHash := "dummy_state_hash"
+// 	dummyParent := "dummy_parent"
+// 	dummyHeight := 123
+// 	dummySlot := 456
+// 	dummyValidationError := "dummy_error"
+// 	dummyVerified := true
 
-	kc.Log.Infof("Updating %d submissions in batch", len(submissions))
-	for _, sub := range submissions {
-		batch.Query(`UPDATE submissions
-            SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?
-            WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`,
-			dummyStateHash, dummyParent, dummyHeight, dummySlot, dummyValidationError, dummyVerified,
-			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter)
-	}
+// 	kc.Log.Infof("Updating %d submissions in batch", len(submissions))
+// 	for _, sub := range submissions {
+// 		batch.Query(`UPDATE submissions
+//             SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?
+//             WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`,
+// 			dummyStateHash, dummyParent, dummyHeight, dummySlot, dummyValidationError, dummyVerified,
+// 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter)
+// 	}
 
-	// Execute the batch
-	if err := kc.Session.ExecuteBatch(batch); err != nil {
-		kc.Log.Errorf("Failed to execute batch update: %v", err)
-		return err
-	}
-	kc.Log.Infof("Submissions updated in batch")
+// 	// Execute the batch
+// 	if err := kc.Session.ExecuteBatch(batch); err != nil {
+// 		kc.Log.Errorf("Failed to execute batch update: %v", err)
+// 		return err
+// 	}
+// 	kc.Log.Infof("Submissions updated in batch")
 
-	return nil
-}
+// 	return nil
+// }
 
 func calculateDateRange(startTime, endTime time.Time) string {
 	var dateRange []string
