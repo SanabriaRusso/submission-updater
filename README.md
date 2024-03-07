@@ -1,5 +1,7 @@
 # Cassandra Updater
 
+[![Build](https://github.com/MinaFoundation/cassandra-updater/actions/workflows/build.yml/badge.svg)](https://github.com/MinaFoundation/cassandra-updater/actions/workflows/build.yml)
+
 Takes a range from submissions, and updates rows with some dummy data...
 
 ## Build
