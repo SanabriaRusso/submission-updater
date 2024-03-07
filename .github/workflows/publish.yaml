@@ -1,0 +1,64 @@
+name: Publish
+
+on:
+  push:
+    tags:
+    - '*'
+  workflow_dispatch:
+    inputs:
+      docker_tag_prefix:
+        description: "Enter the Docker Tag Prefix (e.g adhoc-test)"
+        required: true
+        type: string
+env:
+  ECR_REPOSITORY_URL: 673156464838.dkr.ecr.us-west-2.amazonaws.com
+  ECR_REPOSITORY_NAME: cassandra-updater
+  DOCKER_TAG_PREFIX: ${{ github.event.inputs.docker_tag_prefix }}
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  build-docker-image:
+    name: Build and Push Docker Image
+    runs-on: minafoundation-default-runners
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: 🏷️ Generate Tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            PREFIX=${{ env.DOCKER_TAG_PREFIX }}
+          elif [ "${{ github.event_name }}" == "push" ] && [ -n "${{ github.event.ref }}" ]; then
+            PREFIX=$(basename ${{ github.ref }})
+          else
+            echo "Invalid event. Exiting..."
+            exit 1
+          fi
+          echo "TAG=$PREFIX-$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
+      - name: 🔑 ECR Login
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      - name: 🔍 Check if Tag already exists
+        id: checktag
+        uses: tyriis/docker-image-tag-exists@main
+        with:
+          registry: ${{ env.ECR_REPOSITORY_URL}}
+          repository: ${{ env.ECR_REPOSITORY_NAME }}
+          tag: ${{ env.TAG }}
+      - name: 📦 Install Nix
+        uses: cachix/install-nix-action@v22
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: 🛠️ Build Uptime Service Backend Docker Image
+        if: steps.checktag.outputs.tag == 'not found'
+        run: |
+          TAG=${{ env.TAG }}
+          nix-shell --run "make docker"
+      - name: 🚚 Push Uptime Service Backend Docker Image
+        if: steps.checktag.outputs.tag == 'not found'
+        run: docker push ${{ env.ECR_REPOSITORY_URL}}/${{ env.ECR_REPOSITORY_NAME }}:${{ env.TAG }}
