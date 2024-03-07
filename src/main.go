@@ -12,7 +12,7 @@ func main() {
 	logging.SetupLogging(logging.Config{
 		Format: logging.JSONOutput,
 		Stderr: true,
-		Stdout: false,
+		Stdout: true,
 		Level:  logging.LevelDebug,
 		File:   "",
 	})
