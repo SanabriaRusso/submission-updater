@@ -20,7 +20,6 @@ func main() {
 	startTime, endTime := parseArgs(log)
 
 	appCfg := LoadEnv(log)
-	log.Infof("Loaded app config: %v", appCfg)
 	session, err := InitializeCassandraSession(appCfg.CassandraConfig)
 	if err != nil {
 		log.Fatalf("Error initializing Keyspace session: %v", err)
