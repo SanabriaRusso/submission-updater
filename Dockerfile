@@ -5,6 +5,7 @@ WORKDIR $GOPATH/src
 
 # Copy everything from the current directory to the PWD (Present Working Directory) inside the container
 COPY src src
+COPY database/cert/sf-class2-root.crt /root/.cassandra/sf-class2-root.crt
 
 # Download all the dependencies
 RUN cd src && go get -d -v ./...
