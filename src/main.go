@@ -11,7 +11,7 @@ import (
 func main() {
 	logging.SetupLogging(logging.Config{
 		Format: logging.JSONOutput,
-		Stderr: true,
+		Stderr: false,
 		Stdout: true,
 		Level:  logging.LevelDebug,
 		File:   "",
