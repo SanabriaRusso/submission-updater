@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -140,7 +139,7 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, state_hash, parent, height, slot, validation_error, verified
               FROM submissions
               WHERE ` + calculateDateRange(startTime, endTime) +
-		` AND ` + calculateShardsInRange(startTime, endTime) +
+		` AND ` + shardsToCql(calculateShardsInRange(startTime, endTime)) +
 		` AND submitted_at >= ? AND submitted_at < ?`
 	iter := kc.Session.Query(query, startTime, endTime).Iter()
 
@@ -241,43 +240,4 @@ func calculateDateRange(startTime, endTime time.Time) string {
 	inClause = fmt.Sprintf("submitted_at_date IN ('%s')", inClause)
 	// fmt.Printf("calculateDateRange: %s\n", inClause)
 	return inClause
-}
-
-// calculateShard returns the shard number for a given submission time.
-// 0-599 are the possible shard numbers, each representing a 6-second interval.
-func calculateShard(submittedAt time.Time) int {
-	minute := submittedAt.Minute()
-	second := submittedAt.Second()
-	return minute*10 + second/6
-}
-
-func calculateShardsInRange(startTime, endTime time.Time) string {
-	shards := make(map[int]struct{})
-	var uniqueShards []int
-
-	current := startTime
-	for current.Before(endTime) {
-		shard := calculateShard(current)
-		if _, exists := shards[shard]; !exists {
-			shards[shard] = struct{}{}
-			uniqueShards = append(uniqueShards, shard)
-		}
-		// Move to the next second
-		current = current.Add(time.Second)
-	}
-
-	// Sort the unique shards for readability
-	sort.Ints(uniqueShards)
-
-	// Convert the sorted slice of shards into a slice of strings
-	shardStrs := make([]string, len(uniqueShards))
-	for i, shard := range uniqueShards {
-		shardStrs[i] = fmt.Sprintf("%d", shard)
-	}
-
-	// Format the shards into a CQL statement string
-	shardsStr := strings.Join(shardStrs, ",")
-	cqlStatement := fmt.Sprintf("shard in (%s)", shardsStr)
-	// fmt.Printf("shardsStr: %s\n", cqlStatement)
-	return cqlStatement
 }
