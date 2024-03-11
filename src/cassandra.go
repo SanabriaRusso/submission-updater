@@ -157,7 +157,7 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 	return submissions, nil
 }
 
-func (kc *CassandraContext) updateSubmissions(submissions []Submission) error {
+func (kc *CassandraContext) tryUpdateSubmissions(submissions []Submission) error {
 	// Define your dummy values here
 	dummyStateHash := "dummy_state_hash"
 	dummyParent := "dummy_parent"
@@ -180,6 +180,16 @@ func (kc *CassandraContext) updateSubmissions(submissions []Submission) error {
 	kc.Log.Infof("Submissions updated")
 
 	return nil
+}
+
+func (kc *CassandraContext) updateSubmissions(submissions []Submission) error {
+	return ExponentialBackoff(func() error {
+		if err := kc.tryUpdateSubmissions(submissions); err != nil {
+			kc.Log.Errorf("Error updating submissions (trying again): %v", err)
+			return err
+		}
+		return nil
+	}, maxRetries, initialBackoff)
 }
 
 // func (kc *CassandraContext) updateSubmissionsBatch(submissions []Submission) error {
