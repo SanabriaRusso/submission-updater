@@ -1,4 +1,4 @@
-module cassandra_updater
+module submission_updater
 
 go 1.20
 
