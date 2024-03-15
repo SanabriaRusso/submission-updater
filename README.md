@@ -1,8 +1,8 @@
-# Cassandra Updater
+# Submission Updater
 
 [![Build](https://github.com/MinaFoundation/cassandra-updater/actions/workflows/build.yml/badge.svg)](https://github.com/MinaFoundation/cassandra-updater/actions/workflows/build.yml)
 
-Takes a range from submissions, and updates rows with some dummy data...
+This is a wrapper over the [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify) that is responsible for communication with Cassandra database. It will select a range of submissions from Cassandra, feed `stateless_verifier` with it, collect results and update submissions with gathered data.
 
 ## Build
 ```
