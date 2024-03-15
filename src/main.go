@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -40,6 +41,12 @@ func main() {
 		log.Fatalf("Error selecting range: %v", err)
 	}
 	log.Infof("Number of returned submissions: %v", len(submissions))
+
+	json.Marshal(submissions)
+	// if err != nil {
+	// 	log.Fatalf("Error marshaling submissions to JSON: %v", err)
+	// }
+	// fmt.Print(string(submissionsJSON))
 
 	// Update the submissions
 	err = kc.updateSubmissions(submissions)
