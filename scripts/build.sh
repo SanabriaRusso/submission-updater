@@ -11,6 +11,23 @@ case "$1" in
     cd src
     $GO test
     ;;
+  docker-delegation-verify)
+    if [[ "$TAG" == "" ]]; then
+      echo "Specify TAG env variable."
+      exit 1
+    fi
+    if [[ "$DUNE_PROFILE" == "" ]]; then
+      echo "Specify DUNE_PROFILE env variable. (e.g. devnet)"
+      exit 1
+    fi
+    if [[ "$MINA_BRANCH" == "" ]]; then
+      echo "Specify MINA_BRANCH env variable. (The branch to build the delegation-verify binary from)."
+      exit 1
+    fi
+    # set image name to 673156464838.dkr.ecr.us-west-2.amazonaws.com/uptime-service-backend if IMAGE_NAME is not set
+    IMAGE_NAME=${IMAGE_NAME:-673156464838.dkr.ecr.us-west-2.amazonaws.com/delegation-verify}
+    docker build --build-arg "MINA_BRANCH=$MINA_BRANCH" --build-arg "DUNE_PROFILE=$DUNE_PROFILE" -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
+    ;;
   docker-standalone)
     if [[ "$TAG" == "" ]]; then
       echo "Specify TAG env variable."

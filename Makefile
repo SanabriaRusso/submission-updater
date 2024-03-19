@@ -17,3 +17,6 @@ test:
 docker-standalone:
 	./scripts/build.sh $@
 
+docker-delegation-verify:
+	./scripts/build.sh $@
+
