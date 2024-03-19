@@ -137,7 +137,9 @@ type Submission struct {
 
 func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submission, error) {
 
-	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, state_hash, parent, height, slot, validation_error, verified
+	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, 
+			  raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, 
+			  state_hash, parent, height, slot, validation_error, verified
               FROM submissions
               WHERE ` + calculateDateRange(startTime, endTime) +
 		` AND ` + shardsToCql(calculateShardsInRange(startTime, endTime)) +
@@ -146,7 +148,10 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 
 	var submissions []Submission
 	var submission Submission
-	for iter.Scan(&submission.SubmittedAtDate, &submission.Shard, &submission.SubmittedAt, &submission.Submitter, &submission.CreatedAt, &submission.BlockHash, &submission.RawBlock, &submission.RemoteAddr, &submission.PeerID, &submission.SnarkWork, &submission.GraphqlControlPort, &submission.BuiltWithCommitSha, &submission.StateHash, &submission.Parent, &submission.Height, &submission.Slot, &submission.ValidationError, &submission.Verified) {
+	for iter.Scan(&submission.SubmittedAtDate, &submission.Shard, &submission.SubmittedAt, &submission.Submitter,
+		&submission.CreatedAt, &submission.BlockHash, &submission.RawBlock, &submission.RemoteAddr, &submission.PeerID,
+		&submission.SnarkWork, &submission.GraphqlControlPort, &submission.BuiltWithCommitSha, &submission.StateHash,
+		&submission.Parent, &submission.Height, &submission.Slot, &submission.ValidationError, &submission.Verified) {
 		submissions = append(submissions, submission)
 	}
 	if err := iter.Close(); err != nil {
@@ -160,11 +165,15 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 func (kc *CassandraContext) tryUpdateSubmissions(submissions []Submission) error {
 	kc.Log.Infof("Updating %d submissions", len(submissions))
 	for _, sub := range submissions {
+		// Update the submission
+		// Note: raw_block and snark_work are reseted to nil since we don't want to keep them in the database
 		query := `UPDATE submissions
-                  SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?
+                  SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?, 
+				  raw_block = ?, snark_work = ?
                   WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`
 		if err := kc.Session.Query(query,
 			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
+			nil, nil,
 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter).Exec(); err != nil {
 			kc.Log.Errorf("Failed to update submission: %v", err)
 			return err
