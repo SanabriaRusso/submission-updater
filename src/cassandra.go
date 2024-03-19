@@ -61,7 +61,7 @@ func InitializeCassandraSession(config *CassandraConfig) (*gocql.Session, error)
 	cluster.Consistency = gocql.LocalQuorum
 	cluster.DisableInitialHostLookup = false
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{NumRetries: 10, Min: 100 * time.Millisecond, Max: 10 * time.Second}
-	
+
 	session, err := cluster.CreateSession()
 	if err != nil {
 		return nil, fmt.Errorf("could not create Cassandra session: %w", err)
@@ -158,20 +158,13 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 }
 
 func (kc *CassandraContext) tryUpdateSubmissions(submissions []Submission) error {
-	// Define your dummy values here
-	dummyStateHash := "dummy_state_hash"
-	dummyParent := "dummy_parent"
-	dummyHeight := 123
-	dummySlot := 456
-	dummyValidationError := ""
-	dummyVerified := true
 	kc.Log.Infof("Updating %d submissions", len(submissions))
 	for _, sub := range submissions {
 		query := `UPDATE submissions
                   SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?
                   WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`
 		if err := kc.Session.Query(query,
-			dummyStateHash, dummyParent, dummyHeight, dummySlot, dummyValidationError, dummyVerified,
+			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter).Exec(); err != nil {
 			kc.Log.Errorf("Failed to update submission: %v", err)
 			return err
