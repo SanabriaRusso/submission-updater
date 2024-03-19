@@ -18,7 +18,7 @@ case "$1" in
     fi
     # set image name to 673156464838.dkr.ecr.us-west-2.amazonaws.com/uptime-service-backend if IMAGE_NAME is not set
     IMAGE_NAME=${IMAGE_NAME:-673156464838.dkr.ecr.us-west-2.amazonaws.com/submission-updater}
-    docker build -t "$IMAGE_NAME:$TAG" .
+    docker build -f dockerfiles/Dockerfile-standalone -t "$IMAGE_NAME:$TAG" .
     ;;
   "")
     cd src

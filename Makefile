@@ -14,6 +14,6 @@ tidy:
 test:
 	GO=$(GO) ./scripts/build.sh test
 
-docker:
+docker-standalone:
 	./scripts/build.sh $@
 

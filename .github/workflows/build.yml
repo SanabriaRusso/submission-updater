@@ -26,10 +26,10 @@ jobs:
     - name: 🛠️ Build
       run: nix-shell --run "make build"
 
-    - name: 🛠️ Build Docker
+    - name: 🛠️ Build Docker (submission-updater)
       env:
         TAG: uptime-service-backend-test
-      run: nix-shell --run "make docker"
+      run: nix-shell --run "make docker-standalone"
 
     - name: 🧪 Test
       run: nix-shell --run "make test"
