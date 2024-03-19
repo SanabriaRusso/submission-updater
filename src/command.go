@@ -14,14 +14,16 @@ func runDelegationVerifyCommand(command, input string) ([]Submission, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error running %v: %w", command, err)
 	}
-	submissions, err := parseSubmissions(out)
+	submissions, err := parseDelegationVerifyOutput(out)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing submissions: %w", err)
 	}
 	return submissions, nil
 }
 
-func parseSubmissions(data string) ([]Submission, error) {
+// Output from the delegation verification binary is expected to be a newline-separated JSON array of Submission objects.
+// We parse this into a slice of Submission objects.
+func parseDelegationVerifyOutput(data string) ([]Submission, error) {
 	var submissions []Submission
 
 	// Split the input data into separate records based on newline.
