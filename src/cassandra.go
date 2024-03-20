@@ -147,11 +147,16 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 	iter := kc.Session.Query(query, startTime, endTime).Iter()
 
 	var submissions []Submission
-	var submission Submission
-	for iter.Scan(&submission.SubmittedAtDate, &submission.Shard, &submission.SubmittedAt, &submission.Submitter,
-		&submission.CreatedAt, &submission.BlockHash, &submission.RawBlock, &submission.RemoteAddr, &submission.PeerID,
-		&submission.SnarkWork, &submission.GraphqlControlPort, &submission.BuiltWithCommitSha, &submission.StateHash,
-		&submission.Parent, &submission.Height, &submission.Slot, &submission.ValidationError, &submission.Verified) {
+	for {
+		// we need to scan into new submission object each time
+		// otherwise we will end up with a slice of pointers to the same object
+		var submission Submission
+		if !iter.Scan(&submission.SubmittedAtDate, &submission.Shard, &submission.SubmittedAt, &submission.Submitter,
+			&submission.CreatedAt, &submission.BlockHash, &submission.RawBlock, &submission.RemoteAddr, &submission.PeerID,
+			&submission.SnarkWork, &submission.GraphqlControlPort, &submission.BuiltWithCommitSha, &submission.StateHash,
+			&submission.Parent, &submission.Height, &submission.Slot, &submission.ValidationError, &submission.Verified) {
+			break
+		}
 		submissions = append(submissions, submission)
 	}
 	if err := iter.Close(); err != nil {
