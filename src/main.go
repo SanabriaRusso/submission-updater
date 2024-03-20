@@ -41,26 +41,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error selecting range: %v", err)
 	}
-	log.Infof("Number of returned submissions: %v", len(submissions))
+	numberOfReturnedSubmissions := len(submissions)
+	log.Infof("Number of returned submissions: %v", numberOfReturnedSubmissions)
 
-	log.Info("Running delegation verification...")
-	submissionsJSON, err := json.Marshal(submissions)
-	if err != nil {
-		log.Fatalf("Error marshaling submissions to JSON: %v", err)
+	if numberOfReturnedSubmissions == 0 {
+		log.Info("No submissions to verify")
+		os.Exit(0)
+	} else {
+		log.Info("Running delegation verification...")
+		submissionsJSON, err := json.Marshal(submissions)
+		if err != nil {
+			log.Fatalf("Error marshaling submissions to JSON: %v", err)
+		}
+
+		// Run the delegation verification binary
+		verifiedSubmissions, err := runDelegationVerifyCommand(appCfg.DelegationVerifyBinPath, string(submissionsJSON))
+		if err != nil {
+			log.Fatalf("Error running command: %v", err)
+		}
+
+		// Update the submissions
+		err = kc.updateSubmissions(verifiedSubmissions)
+		if err != nil {
+			log.Fatalf("Error updating submissions: %v", err)
+		}
 	}
-
-	// Run the delegation verification binary
-	verifiedSubmissions, err := runDelegationVerifyCommand(appCfg.DelegationVerifyBinPath, string(submissionsJSON))
-	if err != nil {
-		log.Fatalf("Error running command: %v", err)
-	}
-
-	// Update the submissions
-	err = kc.updateSubmissions(verifiedSubmissions)
-	if err != nil {
-		log.Fatalf("Error updating submissions: %v", err)
-	}
-
 }
 
 func parseArgs(log logging.EventLogger) (startTime time.Time, endTime time.Time) {
