@@ -4,6 +4,9 @@
 # - adds submission_updater binary to /bin
 #################################################################################################
 
+# Builder image
+# publish date: 2024-01-04 08:26:41+02:00
+# gcloud container images list-tags gcr.io/o1labs-192920/mina-toolchain --format=json --filter="digest=sha256:c810338e2c3973f7c674d0607048725917ce2be23b949c4bc9760c01122f884b"
 FROM gcr.io/o1labs-192920/mina-toolchain@sha256:c810338e2c3973f7c674d0607048725917ce2be23b949c4bc9760c01122f884b AS builder
 
 # Use --build-arg "DUNE_PROFILE=dev" to build a dev image or for CI
