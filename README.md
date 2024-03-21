@@ -13,11 +13,11 @@ $ make
 
 ## Configuration
 
-**Runtime Configuration**:
+**1. Runtime Configuration**:
 
   - `DELEGATION_VERIFY_BIN_PATH` - path to [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify) binary.
 
-**AWS Keyspaces/Cassandra Configuration**:
+**2. AWS Keyspaces/Cassandra Configuration**:
 
   **Mandatory/common env vars:**
   - `AWS_KEYSPACE` - Your Keyspace name.
@@ -39,6 +39,16 @@ $ make
   - `AWS_ACCESS_KEY_ID` - Your AWS Access Key ID. No need to set if `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME` and `AWS_ROLE_ARN` are set.
   - `AWS_SECRET_ACCESS_KEY` - Your AWS Secret Access Key. No need to set if `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME` and `AWS_ROLE_ARN` are set.
 
+**3. AWS S3 Configuration**:
+
+  - `AWS_S3_BUCKET` - AWS S3 Bucket
+  - `NETWORK_NAME` - Network name (in case block does not exist in Cassandra 
+                    we attampt to download it from AWS S3 from `AWS_S3_BUCKET`\\`NETWORK_NAME`\blocks)
+  - `AWS_REGION` - The AWS region.
+  - `AWS_ACCESS_KEY_ID` - Your AWS Access Key ID.
+  - `AWS_SECRET_ACCESS_KEY` - Your AWS Secret Access Key.
+
+  
 ## Run
 
 ```
