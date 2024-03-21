@@ -29,6 +29,9 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	// 	}
 	// }
 
+	// delegation_verify bin path
+	delegationVerifyBinPath := getEnvChecked("DELEGATION_VERIFY_BIN_PATH", log)
+
 	// AWSKeyspace/Cassandra configurations
 	awsKeyspace := getEnvChecked("AWS_KEYSPACE", log)
 	sslCertificatePath := getEnvChecked("SSL_CERTFILE", log)
@@ -56,6 +59,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	accessKeyId := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 
+	config.DelegationVerifyBinPath = delegationVerifyBinPath
 	config.CassandraConfig = &CassandraConfig{
 		Keyspace:             awsKeyspace,
 		CassandraHost:        cassandraHost,
@@ -123,5 +127,6 @@ type CassandraConfig struct {
 type AppConfig struct {
 	// NetworkName string `json:"network_name"`
 	// Aws          *AwsConfig          `json:"aws,omitempty"`
-	CassandraConfig *CassandraConfig `json:"cassandra_config,omitempty"`
+	DelegationVerifyBinPath string           `json:"delegation_verify_bin_path"`
+	CassandraConfig         *CassandraConfig `json:"cassandra_config,omitempty"`
 }

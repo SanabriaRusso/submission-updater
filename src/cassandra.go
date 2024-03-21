@@ -61,7 +61,7 @@ func InitializeCassandraSession(config *CassandraConfig) (*gocql.Session, error)
 	cluster.Consistency = gocql.LocalQuorum
 	cluster.DisableInitialHostLookup = false
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{NumRetries: 10, Min: 100 * time.Millisecond, Max: 10 * time.Second}
-	
+
 	session, err := cluster.CreateSession()
 	if err != nil {
 		return nil, fmt.Errorf("could not create Cassandra session: %w", err)
@@ -137,7 +137,9 @@ type Submission struct {
 
 func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submission, error) {
 
-	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, state_hash, parent, height, slot, validation_error, verified
+	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, 
+			  raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, 
+			  state_hash, parent, height, slot, validation_error, verified
               FROM submissions
               WHERE ` + calculateDateRange(startTime, endTime) +
 		` AND ` + shardsToCql(calculateShardsInRange(startTime, endTime)) +
@@ -145,8 +147,16 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 	iter := kc.Session.Query(query, startTime, endTime).Iter()
 
 	var submissions []Submission
-	var submission Submission
-	for iter.Scan(&submission.SubmittedAtDate, &submission.Shard, &submission.SubmittedAt, &submission.Submitter, &submission.CreatedAt, &submission.BlockHash, &submission.RawBlock, &submission.RemoteAddr, &submission.PeerID, &submission.SnarkWork, &submission.GraphqlControlPort, &submission.BuiltWithCommitSha, &submission.StateHash, &submission.Parent, &submission.Height, &submission.Slot, &submission.ValidationError, &submission.Verified) {
+	for {
+		// we need to scan into new submission object each time
+		// otherwise we will end up with a slice of pointers to the same object
+		var submission Submission
+		if !iter.Scan(&submission.SubmittedAtDate, &submission.Shard, &submission.SubmittedAt, &submission.Submitter,
+			&submission.CreatedAt, &submission.BlockHash, &submission.RawBlock, &submission.RemoteAddr, &submission.PeerID,
+			&submission.SnarkWork, &submission.GraphqlControlPort, &submission.BuiltWithCommitSha, &submission.StateHash,
+			&submission.Parent, &submission.Height, &submission.Slot, &submission.ValidationError, &submission.Verified) {
+			break
+		}
 		submissions = append(submissions, submission)
 	}
 	if err := iter.Close(); err != nil {
@@ -158,20 +168,17 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 }
 
 func (kc *CassandraContext) tryUpdateSubmissions(submissions []Submission) error {
-	// Define your dummy values here
-	dummyStateHash := "dummy_state_hash"
-	dummyParent := "dummy_parent"
-	dummyHeight := 123
-	dummySlot := 456
-	dummyValidationError := ""
-	dummyVerified := true
 	kc.Log.Infof("Updating %d submissions", len(submissions))
 	for _, sub := range submissions {
+		// Update the submission
+		// Note: raw_block and snark_work are reseted to nil since we don't want to keep them in the database
 		query := `UPDATE submissions
-                  SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?
+                  SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?, 
+				  raw_block = ?, snark_work = ?
                   WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`
 		if err := kc.Session.Query(query,
-			dummyStateHash, dummyParent, dummyHeight, dummySlot, dummyValidationError, dummyVerified,
+			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
+			nil, nil,
 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter).Exec(); err != nil {
 			kc.Log.Errorf("Failed to update submission: %v", err)
 			return err
@@ -191,36 +198,6 @@ func (kc *CassandraContext) updateSubmissions(submissions []Submission) error {
 		return nil
 	}, maxRetries, initialBackoff)
 }
-
-// func (kc *CassandraContext) updateSubmissionsBatch(submissions []Submission) error {
-// 	batch := kc.Session.NewBatch(gocql.LoggedBatch) // Use gocql.UnloggedBatch for unlogged batches
-
-// 	// Define your dummy values here
-// 	dummyStateHash := "dummy_state_hash"
-// 	dummyParent := "dummy_parent"
-// 	dummyHeight := 123
-// 	dummySlot := 456
-// 	dummyValidationError := "dummy_error"
-// 	dummyVerified := true
-
-// 	kc.Log.Infof("Updating %d submissions in batch", len(submissions))
-// 	for _, sub := range submissions {
-// 		batch.Query(`UPDATE submissions
-//             SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?
-//             WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`,
-// 			dummyStateHash, dummyParent, dummyHeight, dummySlot, dummyValidationError, dummyVerified,
-// 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter)
-// 	}
-
-// 	// Execute the batch
-// 	if err := kc.Session.ExecuteBatch(batch); err != nil {
-// 		kc.Log.Errorf("Failed to execute batch update: %v", err)
-// 		return err
-// 	}
-// 	kc.Log.Infof("Submissions updated in batch")
-
-// 	return nil
-// }
 
 func calculateDateRange(startTime, endTime time.Time) string {
 	var dateRange []string

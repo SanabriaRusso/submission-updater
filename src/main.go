@@ -17,10 +17,12 @@ func main() {
 		Level:  logging.LevelDebug,
 		File:   "",
 	})
-	log := logging.Logger("Cassandra updater")
+	log := logging.Logger("Submission Updater")
 	startTime, endTime := parseArgs(log)
 
 	appCfg := LoadEnv(log)
+	log.Info("Submission Updater started...")
+	log.Infof("Using DELEGATION_VERIFY_BIN_PATH: %v", appCfg.DelegationVerifyBinPath)
 	session, err := InitializeCassandraSession(appCfg.CassandraConfig)
 	if err != nil {
 		log.Fatalf("Error initializing Keyspace session: %v", err)
@@ -33,27 +35,37 @@ func main() {
 		Log:      log,
 	}
 	log.Infof("Cassandra session initialized")
-
 	log.Infof("Selecting submissions in range: (%v, %v)", startTime.Format("2006-01-02 15:04:05.0-0700"), endTime.Format("2006-01-02 15:04:05.0-0700"))
 
 	submissions, err := kc.selectRange(startTime, endTime)
 	if err != nil {
 		log.Fatalf("Error selecting range: %v", err)
 	}
-	log.Infof("Number of returned submissions: %v", len(submissions))
+	numberOfReturnedSubmissions := len(submissions)
+	log.Infof("Number of returned submissions: %v", numberOfReturnedSubmissions)
 
-	json.Marshal(submissions)
-	// if err != nil {
-	// 	log.Fatalf("Error marshaling submissions to JSON: %v", err)
-	// }
-	// fmt.Print(string(submissionsJSON))
+	if numberOfReturnedSubmissions == 0 {
+		log.Info("No submissions to verify")
+		os.Exit(0)
+	} else {
+		log.Info("Running delegation verification...")
+		submissionsJSON, err := json.Marshal(submissions)
+		if err != nil {
+			log.Fatalf("Error marshaling submissions to JSON: %v", err)
+		}
 
-	// Update the submissions
-	err = kc.updateSubmissions(submissions)
-	if err != nil {
-		log.Fatalf("Error updating submissions: %v", err)
+		// Run the delegation verification binary
+		verifiedSubmissions, err := runDelegationVerifyCommand(appCfg.DelegationVerifyBinPath, string(submissionsJSON))
+		if err != nil {
+			log.Fatalf("Error running command: %v", err)
+		}
+
+		// Update the submissions
+		err = kc.updateSubmissions(verifiedSubmissions)
+		if err != nil {
+			log.Fatalf("Error updating submissions: %v", err)
+		}
 	}
-
 }
 
 func parseArgs(log logging.EventLogger) (startTime time.Time, endTime time.Time) {
