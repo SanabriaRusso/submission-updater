@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/aws/aws-sigv4-auth-cassandra-gocql-driver-plugin/sigv4"
 	"github.com/gocql/gocql"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	logging "github.com/ipfs/go-log/v2"
 )
 
 // InitializeCassandraSession creates a new gocql session for Amazon Keyspaces using the provided configuration.
@@ -108,12 +108,6 @@ func sigv4Authentication(config *CassandraConfig) (sigv4.AwsAuthenticator, error
 	return auth, nil
 }
 
-type CassandraContext struct {
-	Session  *gocql.Session
-	Keyspace string
-	Log      *logging.ZapEventLogger
-}
-
 type Submission struct {
 	SubmittedAtDate    string    `json:"submitted_at_date"`
 	Shard              int       `json:"shard"`
@@ -121,7 +115,7 @@ type Submission struct {
 	Submitter          string    `json:"submitter"`
 	CreatedAt          time.Time `json:"created_at"`
 	BlockHash          string    `json:"block_hash"`
-	RawBlock           []byte    `json:"raw_block"`
+	RawBlock           RawBlock  `json:"raw_block"`
 	RemoteAddr         string    `json:"remote_addr"`
 	PeerID             string    `json:"peer_id"`
 	SnarkWork          []byte    `json:"snark_work"`
@@ -135,7 +129,21 @@ type Submission struct {
 	Verified           bool      `json:"verified"`
 }
 
-func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submission, error) {
+type RawBlock []byte
+
+// Custom JSON marshalling for RawBlock type
+// This is necessary because the default marshalling of empty byte slice
+// is "null" instead of ""
+// and delegation-verify expects string for raw_block
+// we need this such that delegation-verify doesn't stop processing in case we have empty raw_block
+func (b RawBlock) MarshalJSON() ([]byte, error) {
+	if len(b) == 0 {
+		return []byte(`""`), nil
+	}
+	return json.Marshal([]byte(b))
+}
+
+func (ctx *Context) selectRange(startTime, endTime time.Time) ([]Submission, error) {
 
 	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, 
 			  raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, 
@@ -144,7 +152,7 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
               WHERE ` + calculateDateRange(startTime, endTime) +
 		` AND ` + shardsToCql(calculateShardsInRange(startTime, endTime)) +
 		` AND submitted_at >= ? AND submitted_at < ?`
-	iter := kc.Session.Query(query, startTime, endTime).Iter()
+	iter := ctx.CassandraSession.Query(query, startTime, endTime).Iter()
 
 	var submissions []Submission
 	for {
@@ -160,15 +168,15 @@ func (kc *CassandraContext) selectRange(startTime, endTime time.Time) ([]Submiss
 		submissions = append(submissions, submission)
 	}
 	if err := iter.Close(); err != nil {
-		kc.Log.Errorf("Error closing iterator: %s", err)
+		ctx.Log.Errorf("Error closing iterator: %s", err)
 		return nil, err
 	}
 
 	return submissions, nil
 }
 
-func (kc *CassandraContext) tryUpdateSubmissions(submissions []Submission) error {
-	kc.Log.Infof("Updating %d submissions", len(submissions))
+func (ctx *Context) tryUpdateSubmissions(submissions []Submission) error {
+	ctx.Log.Infof("Updating %d submissions", len(submissions))
 	for _, sub := range submissions {
 		// Update the submission
 		// Note: raw_block and snark_work are reseted to nil since we don't want to keep them in the database
@@ -176,23 +184,23 @@ func (kc *CassandraContext) tryUpdateSubmissions(submissions []Submission) error
                   SET state_hash = ?, parent = ?, height = ?, slot = ?, validation_error = ?, verified = ?, 
 				  raw_block = ?, snark_work = ?
                   WHERE submitted_at_date = ? AND shard = ? AND submitted_at = ? AND submitter = ?`
-		if err := kc.Session.Query(query,
+		if err := ctx.CassandraSession.Query(query,
 			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
 			nil, nil,
 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter).Exec(); err != nil {
-			kc.Log.Errorf("Failed to update submission: %v", err)
+			ctx.Log.Errorf("Failed to update submission: %v", err)
 			return err
 		}
 	}
-	kc.Log.Infof("Submissions updated")
+	ctx.Log.Infof("Submissions updated")
 
 	return nil
 }
 
-func (kc *CassandraContext) updateSubmissions(submissions []Submission) error {
+func (ctx *Context) updateSubmissions(submissions []Submission) error {
 	return ExponentialBackoff(func() error {
-		if err := kc.tryUpdateSubmissions(submissions); err != nil {
-			kc.Log.Errorf("Error updating submissions (trying again): %v", err)
+		if err := ctx.tryUpdateSubmissions(submissions); err != nil {
+			ctx.Log.Errorf("Error updating submissions (trying again): %v", err)
 			return err
 		}
 		return nil
