@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gocql/gocql"
 	logging "github.com/ipfs/go-log/v2"
@@ -14,13 +16,13 @@ type AppContext struct {
 }
 
 // NewAppContext creates a new context with the necessary components.
-func NewAppContext(cassandraConfig *CassandraConfig, awsConfig *AwsConfig, log *logging.ZapEventLogger) (*AppContext, error) {
+func NewAppContext(ctx context.Context, cassandraConfig *CassandraConfig, awsConfig *AwsConfig, log *logging.ZapEventLogger) (*AppContext, error) {
 	cassandraSession, err := InitializeCassandraSession(cassandraConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	s3Session, err := InitializeS3Session(awsConfig.Region)
+	s3Session, err := InitializeS3Session(ctx, awsConfig.Region)
 	if err != nil {
 		return nil, err
 	}
