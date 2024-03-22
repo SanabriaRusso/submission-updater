@@ -6,15 +6,15 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 )
 
-// Context holds shared resources and configurations.
-type Context struct {
+// AppContext holds shared resources and configurations.
+type AppContext struct {
 	CassandraSession *gocql.Session
 	S3Session        *s3.Client
 	Log              *logging.ZapEventLogger
 }
 
-// NewContext creates a new context with the necessary components.
-func NewContext(cassandraConfig *CassandraConfig, awsConfig *AwsConfig, log *logging.ZapEventLogger) (*Context, error) {
+// NewAppContext creates a new context with the necessary components.
+func NewAppContext(cassandraConfig *CassandraConfig, awsConfig *AwsConfig, log *logging.ZapEventLogger) (*AppContext, error) {
 	cassandraSession, err := InitializeCassandraSession(cassandraConfig)
 	if err != nil {
 		return nil, err
@@ -25,7 +25,7 @@ func NewContext(cassandraConfig *CassandraConfig, awsConfig *AwsConfig, log *log
 		return nil, err
 	}
 
-	return &Context{
+	return &AppContext{
 		CassandraSession: cassandraSession,
 		Log:              log,
 		S3Session:        s3Session,

@@ -20,7 +20,7 @@ func InitializeS3Session(region string) (*s3.Client, error) {
 	return client, nil
 }
 
-func (ctx *Context) addMissingBlocksFromS3(submissions []Submission, appCfg AppConfig) []Submission {
+func (ctx *AppContext) addMissingBlocksFromS3(submissions []Submission, appCfg AppConfig) []Submission {
 	for i, sub := range submissions {
 		if len(sub.RawBlock) == 0 {
 			blockPath := appCfg.NetworkName + "/blocks/" + sub.BlockHash + ".dat"

@@ -29,7 +29,7 @@ func main() {
 	}
 	defer session.Close()
 
-	ctx, err := NewContext(appCfg.CassandraConfig, appCfg.AwsConfig, log)
+	ctx, err := NewAppContext(appCfg.CassandraConfig, appCfg.AwsConfig, log)
 	if err != nil {
 		log.Fatalf("Error creating context: %v", err)
 	}

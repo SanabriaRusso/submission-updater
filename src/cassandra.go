@@ -107,7 +107,7 @@ func sigv4Authentication(config *CassandraConfig) (sigv4.AwsAuthenticator, error
 	return auth, nil
 }
 
-func (ctx *Context) selectRange(startTime, endTime time.Time) ([]Submission, error) {
+func (ctx *AppContext) selectRange(startTime, endTime time.Time) ([]Submission, error) {
 
 	query := `SELECT submitted_at_date, shard, submitted_at, submitter, created_at, block_hash, 
 			  raw_block, remote_addr, peer_id, snark_work, graphql_control_port, built_with_commit_sha, 
@@ -139,7 +139,7 @@ func (ctx *Context) selectRange(startTime, endTime time.Time) ([]Submission, err
 	return submissions, nil
 }
 
-func (ctx *Context) tryUpdateSubmissions(submissions []Submission) error {
+func (ctx *AppContext) tryUpdateSubmissions(submissions []Submission) error {
 	ctx.Log.Infof("Updating %d submissions", len(submissions))
 	for _, sub := range submissions {
 		// Update the submission
@@ -161,7 +161,7 @@ func (ctx *Context) tryUpdateSubmissions(submissions []Submission) error {
 	return nil
 }
 
-func (ctx *Context) updateSubmissions(submissions []Submission) error {
+func (ctx *AppContext) updateSubmissions(submissions []Submission) error {
 	return ExponentialBackoff(func() error {
 		if err := ctx.tryUpdateSubmissions(submissions); err != nil {
 			ctx.Log.Errorf("Error updating submissions (trying again): %v", err)
