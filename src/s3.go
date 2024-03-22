@@ -1,30 +1,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-func InitializeS3Session(region string) (*s3.S3, error) {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(region)},
-	)
+func InitializeS3Session(region string) (*s3.Client, error) {
+	awsCfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	if err != nil {
-		return nil, fmt.Errorf("error initializing AWS session: %w", err)
+		return nil, fmt.Errorf("error loading AWS configuration: %w", err)
 	}
 
-	return s3.New(sess), nil
+	client := s3.NewFromConfig(awsCfg)
+	return client, nil
 }
 
 func (ctx *Context) addMissingBlocksFromS3(submissions []Submission, appCfg AppConfig) []Submission {
 	for i, sub := range submissions {
 		if len(sub.RawBlock) == 0 {
 			blockPath := appCfg.NetworkName + "/blocks/" + sub.BlockHash + ".dat"
-			result, err := ctx.S3Session.GetObject(&s3.GetObjectInput{
+			result, err := ctx.S3Session.GetObject(context.TODO(), &s3.GetObjectInput{
 				Bucket: aws.String(appCfg.AwsConfig.BucketName),
 				Key:    aws.String(blockPath),
 			})

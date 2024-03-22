@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gocql/gocql"
 	logging "github.com/ipfs/go-log/v2"
 )
@@ -9,7 +9,7 @@ import (
 // Context holds shared resources and configurations.
 type Context struct {
 	CassandraSession *gocql.Session
-	S3Session        *s3.S3
+	S3Session        *s3.Client
 	Log              *logging.ZapEventLogger
 }
 
