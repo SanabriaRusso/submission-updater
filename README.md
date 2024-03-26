@@ -41,14 +41,11 @@ $ make
 
 **3. AWS S3 Configuration**:
 
-  - `AWS_S3_BUCKET` - AWS S3 Bucket
-  - `NETWORK_NAME` - Network name (in case block does not exist in Cassandra 
-                    we attampt to download it from AWS S3 from `AWS_S3_BUCKET`\\`NETWORK_NAME`\blocks)
-  - `AWS_REGION` - The AWS region.
-  - `AWS_ACCESS_KEY_ID` - Your AWS Access Key ID.
-  - `AWS_SECRET_ACCESS_KEY` - Your AWS Secret Access Key.
-
-  
+  - `AWS_S3_BUCKET` - AWS S3 Bucket where blocks and submissions are stored.
+  - `NETWORK_NAME` - Network name (in case block does not exist in Cassandra we attempt to download it from AWS S3 from `AWS_S3_BUCKET`\\`NETWORK_NAME`\blocks)
+  - `AWS_REGION` - The AWS region where your S3 bucket is located. While this is automatically retrieved, it can also be explicitly set through environment variables or AWS configuration files.
+  - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` - Your AWS credentials. These are automatically retrieved from your environment or AWS configuration files but should be securely stored and accessible in your deployment environment.
+ 
 ## Run
 
 ```
