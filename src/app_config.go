@@ -10,27 +10,23 @@ import (
 func LoadEnv(log logging.EventLogger) AppConfig {
 	var config AppConfig
 
-	// networkName := getEnvChecked("NETWORK_NAME", log)
-	// config.NetworkName = networkName
-
-	// // AWS configurations
-	// if bucketName := os.Getenv("AWS_BUCKET"); bucketName != "" {
-	// 	// accessKeyId, secretAccessKey are not mandatory for production set up
-	// 	accessKeyId := os.Getenv("AWS_ACCESS_KEY_ID")
-	// 	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	// 	awsRegion := getEnvChecked("AWS_REGION", log)
-	// 	bucketName = getEnvChecked("AWS_BUCKET", log)
-
-	// 	config.Aws = &AwsConfig{
-	// 		BucketName:      bucketName,
-	// 		Region:          awsRegion,
-	// 		AccessKeyId:     accessKeyId,
-	// 		SecretAccessKey: secretAccessKey,
-	// 	}
-	// }
-
 	// delegation_verify bin path
 	delegationVerifyBinPath := getEnvChecked("DELEGATION_VERIFY_BIN_PATH", log)
+	networkName := getEnvChecked("NETWORK_NAME", log)
+
+	// AWS configurations
+	bucketName := getEnvChecked("AWS_S3_BUCKET", log)
+	awsRegion := os.Getenv("AWS_REGION")
+
+	// if webIdentityTokenFile, roleSessionName and roleArn are set,
+	// we are using AWS STS to assume a role and get temporary credentials
+	// if they are not set, we are using AWS IAM user credentials
+	webIdentityTokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+	roleSessionName := os.Getenv("AWS_ROLE_SESSION_NAME")
+	roleArn := os.Getenv("AWS_ROLE_ARN")
+	// accessKeyId, secretAccessKey are not mandatory for production set up
+	accessKeyId := os.Getenv("AWS_ACCESS_KEY_ID")
+	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 
 	// AWSKeyspace/Cassandra configurations
 	awsKeyspace := getEnvChecked("AWS_KEYSPACE", log)
@@ -46,19 +42,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	cassandraUsername := os.Getenv("CASSANDRA_USERNAME")
 	cassandraPassword := os.Getenv("CASSANDRA_PASSWORD")
 
-	//aws keyspaces connection
-	awsRegion := os.Getenv("AWS_REGION")
-
-	// if webIdentityTokenFile, roleSessionName and roleArn are set,
-	// we are using AWS STS to assume a role and get temporary credentials
-	// if they are not set, we are using AWS IAM user credentials
-	webIdentityTokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
-	roleSessionName := os.Getenv("AWS_ROLE_SESSION_NAME")
-	roleArn := os.Getenv("AWS_ROLE_ARN")
-	// accessKeyId, secretAccessKey are not mandatory for production set up
-	accessKeyId := os.Getenv("AWS_ACCESS_KEY_ID")
-	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-
+	config.NetworkName = networkName
 	config.DelegationVerifyBinPath = delegationVerifyBinPath
 	config.CassandraConfig = &CassandraConfig{
 		Keyspace:             awsKeyspace,
@@ -74,6 +58,12 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 		RoleArn:              roleArn,
 		SSLCertificatePath:   sslCertificatePath,
 	}
+	config.AwsConfig = &AwsConfig{
+		BucketName:      bucketName,
+		Region:          awsRegion,
+		AccessKeyId:     accessKeyId,
+		SecretAccessKey: secretAccessKey,
+	}
 
 	return config
 }
@@ -86,28 +76,12 @@ func getEnvChecked(variable string, log logging.EventLogger) string {
 	return value
 }
 
-// func boolEnvChecked(variable string, log logging.EventLogger) bool {
-// 	value := os.Getenv(variable)
-// 	switch value {
-// 	case "1":
-// 		return true
-// 	case "0":
-// 		return false
-// 	case "":
-// 		return false
-// 	default:
-// 		log.Fatalf("%s, if set, should be either 0 or 1!", variable)
-// 		return false
-// 	}
-// }
-
-// type AwsConfig struct {
-// 	AccountId       string `json:"account_id"`
-// 	BucketName      string `json:"bucket_name_suffix"`
-// 	Region          string `json:"region"`
-// 	AccessKeyId     string `json:"access_key_id"`
-// 	SecretAccessKey string `json:"secret_access_key"`
-// }
+type AwsConfig struct {
+	BucketName      string `json:"bucket_name"`
+	Region          string `json:"region"`
+	AccessKeyId     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
+}
 
 type CassandraConfig struct {
 	Keyspace             string `json:"keyspace"`
@@ -125,8 +99,8 @@ type CassandraConfig struct {
 }
 
 type AppConfig struct {
-	// NetworkName string `json:"network_name"`
-	// Aws          *AwsConfig          `json:"aws,omitempty"`
+	NetworkName             string           `json:"network_name"`
 	DelegationVerifyBinPath string           `json:"delegation_verify_bin_path"`
-	CassandraConfig         *CassandraConfig `json:"cassandra_config,omitempty"`
+	AwsConfig               *AwsConfig       `json:"aws"`
+	CassandraConfig         *CassandraConfig `json:"cassandra_config"`
 }

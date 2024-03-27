@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -21,6 +22,8 @@ func main() {
 	startTime, endTime := parseArgs(log)
 
 	appCfg := LoadEnv(log)
+	ctx := context.Background()
+
 	log.Info("Submission Updater started...")
 	log.Infof("Using DELEGATION_VERIFY_BIN_PATH: %v", appCfg.DelegationVerifyBinPath)
 	session, err := InitializeCassandraSession(appCfg.CassandraConfig)
@@ -29,15 +32,15 @@ func main() {
 	}
 	defer session.Close()
 
-	kc := CassandraContext{
-		Session:  session,
-		Keyspace: appCfg.CassandraConfig.Keyspace,
-		Log:      log,
+	appCtx, err := NewAppContext(ctx, appCfg.CassandraConfig, appCfg.AwsConfig, log)
+	if err != nil {
+		log.Fatalf("Error creating context: %v", err)
 	}
-	log.Infof("Cassandra session initialized")
+
+	log.Infof("Cassandra and S3 sessions initialized")
 	log.Infof("Selecting submissions in range: (%v, %v)", startTime.Format("2006-01-02 15:04:05.0-0700"), endTime.Format("2006-01-02 15:04:05.0-0700"))
 
-	submissions, err := kc.selectRange(startTime, endTime)
+	submissions, err := appCtx.selectRange(startTime, endTime)
 	if err != nil {
 		log.Fatalf("Error selecting range: %v", err)
 	}
@@ -48,6 +51,9 @@ func main() {
 		log.Info("No submissions to verify")
 		os.Exit(0)
 	} else {
+		log.Info("Adding potentialy missing blocks from S3...")
+		submissions = appCtx.addMissingBlocksFromS3(ctx, submissions, appCfg)
+
 		log.Info("Running delegation verification...")
 		submissionsJSON, err := json.Marshal(submissions)
 		if err != nil {
@@ -61,7 +67,7 @@ func main() {
 		}
 
 		// Update the submissions
-		err = kc.updateSubmissions(verifiedSubmissions)
+		err = appCtx.updateSubmissions(verifiedSubmissions)
 		if err != nil {
 			log.Fatalf("Error updating submissions: %v", err)
 		}
