@@ -16,6 +16,7 @@ $ make
 **1. Runtime Configuration**:
 
   - `DELEGATION_VERIFY_BIN_PATH` - path to [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify) binary.
+  - `NO_CHECKS` - if set to `1`, stateless verifier tool will run with `--no-checks` flag
 
 **2. AWS Keyspaces/Cassandra Configuration**:
 

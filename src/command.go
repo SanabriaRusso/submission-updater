@@ -8,8 +8,14 @@ import (
 	"strings"
 )
 
-func runDelegationVerifyCommand(command, input string) ([]Submission, error) {
-	cmd := fmt.Sprintf("%v stdin", command)
+func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Submission, error) {
+	var cmd string
+	if ctx.AppConfig.NoChecks {
+		ctx.Log.Info("Note! Running with --no-checks flag. This will skip some checks.")
+		cmd = fmt.Sprintf("%v stdin --no-checks", command)
+	} else {
+		cmd = fmt.Sprintf("%v stdin", command)
+	}
 	out, err := runCommand(cmd, input)
 	if err != nil {
 		return nil, fmt.Errorf("error running %v: %w", command, err)

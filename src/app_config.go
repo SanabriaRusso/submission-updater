@@ -12,6 +12,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 
 	// delegation_verify bin path
 	delegationVerifyBinPath := getEnvChecked("DELEGATION_VERIFY_BIN_PATH", log)
+	noChecks := boolEnvChecked("NO_CHECKS", log)
 	networkName := getEnvChecked("NETWORK_NAME", log)
 
 	// AWS configurations
@@ -44,6 +45,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 
 	config.NetworkName = networkName
 	config.DelegationVerifyBinPath = delegationVerifyBinPath
+	config.NoChecks = noChecks
 	config.CassandraConfig = &CassandraConfig{
 		Keyspace:             awsKeyspace,
 		CassandraHost:        cassandraHost,
@@ -76,6 +78,21 @@ func getEnvChecked(variable string, log logging.EventLogger) string {
 	return value
 }
 
+func boolEnvChecked(variable string, log logging.EventLogger) bool {
+	value := os.Getenv(variable)
+	switch value {
+	case "1":
+		return true
+	case "0":
+		return false
+	case "":
+		return false
+	default:
+		log.Fatalf("%s, if set, should be either 0 or 1!", variable)
+		return false
+	}
+}
+
 type AwsConfig struct {
 	BucketName      string `json:"bucket_name"`
 	Region          string `json:"region"`
@@ -101,6 +118,7 @@ type CassandraConfig struct {
 type AppConfig struct {
 	NetworkName             string           `json:"network_name"`
 	DelegationVerifyBinPath string           `json:"delegation_verify_bin_path"`
+	NoChecks                bool             `json:"no_checks"`
 	AwsConfig               *AwsConfig       `json:"aws"`
 	CassandraConfig         *CassandraConfig `json:"cassandra_config"`
 }
