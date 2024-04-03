@@ -32,7 +32,7 @@ func main() {
 	}
 	defer session.Close()
 
-	appCtx, err := NewAppContext(ctx, appCfg.CassandraConfig, appCfg.AwsConfig, log)
+	appCtx, err := NewAppContext(ctx, appCfg, log)
 	if err != nil {
 		log.Fatalf("Error creating context: %v", err)
 	}
@@ -61,7 +61,7 @@ func main() {
 		}
 
 		// Run the delegation verification binary
-		verifiedSubmissions, err := runDelegationVerifyCommand(appCfg.DelegationVerifyBinPath, string(submissionsJSON))
+		verifiedSubmissions, err := appCtx.runDelegationVerifyCommand(appCfg.DelegationVerifyBinPath, string(submissionsJSON))
 		if err != nil {
 			log.Fatalf("Error running command: %v", err)
 		}

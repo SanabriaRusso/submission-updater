@@ -12,17 +12,18 @@ import (
 type AppContext struct {
 	CassandraSession *gocql.Session
 	S3Session        *s3.Client
+	AppConfig        AppConfig
 	Log              *logging.ZapEventLogger
 }
 
 // NewAppContext creates a new context with the necessary components.
-func NewAppContext(ctx context.Context, cassandraConfig *CassandraConfig, awsConfig *AwsConfig, log *logging.ZapEventLogger) (*AppContext, error) {
-	cassandraSession, err := InitializeCassandraSession(cassandraConfig)
+func NewAppContext(ctx context.Context, config AppConfig, log *logging.ZapEventLogger) (*AppContext, error) {
+	cassandraSession, err := InitializeCassandraSession(config.CassandraConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	s3Session, err := InitializeS3Session(ctx, awsConfig.Region)
+	s3Session, err := InitializeS3Session(ctx, config.AwsConfig.Region)
 	if err != nil {
 		return nil, err
 	}
@@ -31,5 +32,6 @@ func NewAppContext(ctx context.Context, cassandraConfig *CassandraConfig, awsCon
 		CassandraSession: cassandraSession,
 		Log:              log,
 		S3Session:        s3Session,
+		AppConfig:        config,
 	}, nil
 }
