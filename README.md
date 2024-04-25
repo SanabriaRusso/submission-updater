@@ -17,6 +17,7 @@ $ make
 
   - `DELEGATION_VERIFY_BIN_PATH` - path to [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify) binary.
   - `NO_CHECKS` - if set to `1`, stateless verifier tool will run with `--no-checks` flag
+  - `SUBMISSION_STORAGE` - Storage where submissions are kept. Valid options: `POSTGRES` or `CASSANDRA`. Default: `POSTGRES`.
 
 **2. AWS Keyspaces/Cassandra Configuration**:
 
@@ -46,7 +47,18 @@ $ make
   - `NETWORK_NAME` - Network name (in case block does not exist in Cassandra we attempt to download it from AWS S3 from `AWS_S3_BUCKET`\\`NETWORK_NAME`\blocks)
   - `AWS_REGION` - The AWS region where your S3 bucket is located. While this is automatically retrieved, it can also be explicitly set through environment variables or AWS configuration files.
   - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` - Your AWS credentials. These are automatically retrieved from your environment or AWS configuration files but should be securely stored and accessible in your deployment environment.
- 
+
+**4. PostgreSQL Configuration**
+
+If this storage backend is configured it is assumed that submissions are written into `submissions` table in the uptime-service-validation (coordinator) component. In this mode we are not storing `raw_block` in the database.
+
+- `POSTGRES_HOST` - Hostname or IP address where your PostgreSQL server is running.
+- `POSTGRES_PORT` - Port number on which PostgreSQL is listening.
+- `POSTGRES_DB` - The name of the database to connect to. This is the uptime-service-validation database.
+- `POSTGRES_USER` - The username with which to connect to the database.
+- `POSTGRES_PASSWORD` - The password for the database user.
+- `POSTGRES_SSLMODE` - The mode for SSL connectivity (e.g., `disable`, `require`, `verify-ca`, `verify-full`). Default is `require` for secure setups.
+
 ## Run
 
 ```
