@@ -21,8 +21,17 @@ func InitializeS3Session(ctx context.Context, region string) (*s3.Client, error)
 }
 
 func (appCtx *AppContext) addMissingBlocksFromS3(ctx context.Context, submissions []Submission, appCfg AppConfig) []Submission {
+	blockCache := make(map[string][]byte) // Cache for holding block data
+
 	for i, sub := range submissions {
 		if len(sub.RawBlock) == 0 {
+			// Check if the block is already in the cache
+			if rawBlock, found := blockCache[sub.BlockHash]; found {
+				submissions[i].RawBlock = rawBlock
+				continue
+			}
+
+			// Block not in cache, download it from S3
 			blockPath := appCfg.NetworkName + "/blocks/" + sub.BlockHash + ".dat"
 			result, err := appCtx.S3Session.GetObject(ctx, &s3.GetObjectInput{
 				Bucket: aws.String(appCfg.AwsConfig.BucketName),
@@ -33,6 +42,7 @@ func (appCtx *AppContext) addMissingBlocksFromS3(ctx context.Context, submission
 				// Continue to next submission instead of stopping
 				continue
 			}
+			defer result.Body.Close()
 
 			rawBlock, err := io.ReadAll(result.Body)
 			if err != nil {
@@ -44,10 +54,14 @@ func (appCtx *AppContext) addMissingBlocksFromS3(ctx context.Context, submission
 			// Update submission with the retrieved block
 			// if the block was successfully read
 			// if block not read, assign empty byte slice
+			// also cache the block data for future use
 			if len(rawBlock) > 0 {
+				blockCache[sub.BlockHash] = rawBlock
 				submissions[i].RawBlock = rawBlock
 			} else {
-				submissions[i].RawBlock = []byte(`""`)
+				emptyBlock := []byte(`""`)
+				blockCache[sub.BlockHash] = emptyBlock
+				submissions[i].RawBlock = emptyBlock
 			}
 		}
 	}

@@ -52,7 +52,7 @@ func main() {
 		log.Info("No submissions to verify")
 		os.Exit(0)
 	} else {
-		log.Info("Adding potentialy missing blocks from S3...")
+		log.Info("Adding missing blocks from S3...")
 		submissions = appCtx.addMissingBlocksFromS3(ctx, submissions, appCfg)
 
 		log.Info("Running delegation verification...")
