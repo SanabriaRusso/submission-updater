@@ -25,6 +25,7 @@ func main() {
 	ctx := context.Background()
 
 	log.Info("Submission Updater started...")
+	log.Info("Using SUBMISSION_STORAGE: ", appCfg.SubmissionStorage)
 	log.Infof("Using DELEGATION_VERIFY_BIN_PATH: %v", appCfg.DelegationVerifyBinPath)
 	session, err := InitializeCassandraSession(appCfg.CassandraConfig)
 	if err != nil {
@@ -37,7 +38,7 @@ func main() {
 		log.Fatalf("Error creating context: %v", err)
 	}
 
-	log.Infof("Cassandra and S3 sessions initialized")
+	log.Infof("S3 session initialized")
 	log.Infof("Selecting submissions in range: (%v, %v)", startTime.Format("2006-01-02 15:04:05.0-0700"), endTime.Format("2006-01-02 15:04:05.0-0700"))
 
 	submissions, err := appCtx.selectRange(startTime, endTime)
