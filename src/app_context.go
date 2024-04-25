@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gocql/gocql"
@@ -47,4 +48,18 @@ func NewAppContext(ctx context.Context, config AppConfig, log *logging.ZapEventL
 		S3Session:        s3Session,
 		AppConfig:        config,
 	}, nil
+}
+
+func (ctx *AppContext) selectRange(startTime, endTime time.Time) ([]Submission, error) {
+	if ctx.AppConfig.SubmissionStorage == "CASSANDRA" {
+		return ctx.selectRangeCassandra(startTime, endTime)
+	}
+	return ctx.selectRangePostgres(startTime, endTime)
+}
+
+func (ctx *AppContext) updateSubmissions(submissions []Submission) error {
+	if ctx.AppConfig.SubmissionStorage == "CASSANDRA" {
+		return ctx.updateSubmissionsCassandra(submissions)
+	}
+	return ctx.updateSubmissionsPostgres(submissions)
 }
