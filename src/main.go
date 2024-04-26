@@ -27,11 +27,6 @@ func main() {
 	log.Info("Submission Updater started...")
 	log.Info("Using SUBMISSION_STORAGE: ", appCfg.SubmissionStorage)
 	log.Infof("Using DELEGATION_VERIFY_BIN_PATH: %v", appCfg.DelegationVerifyBinPath)
-	session, err := InitializeCassandraSession(appCfg.CassandraConfig)
-	if err != nil {
-		log.Fatalf("Error initializing Keyspace session: %v", err)
-	}
-	defer session.Close()
 
 	appCtx, err := NewAppContext(ctx, appCfg, log)
 	if err != nil {
