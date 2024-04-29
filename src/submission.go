@@ -8,6 +8,7 @@ import (
 // Submission represents a single submission to be verified
 // It represents single row in the submissions table
 type Submission struct {
+	ID                 string    `json:"id"`
 	SubmittedAtDate    string    `json:"submitted_at_date"`
 	Shard              int       `json:"shard"`
 	SubmittedAt        time.Time `json:"submitted_at"`

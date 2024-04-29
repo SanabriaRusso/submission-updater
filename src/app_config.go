@@ -1,14 +1,18 @@
 package main
 
 import (
+	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
 )
 
 func LoadEnv(log logging.EventLogger) AppConfig {
 	var config AppConfig
+
+	submissionStorage := getSubmissionStorage()
 
 	// delegation_verify bin path
 	delegationVerifyBinPath := getEnvChecked("DELEGATION_VERIFY_BIN_PATH", log)
@@ -18,7 +22,6 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	// AWS configurations
 	bucketName := getEnvChecked("AWS_S3_BUCKET", log)
 	awsRegion := os.Getenv("AWS_REGION")
-
 	// if webIdentityTokenFile, roleSessionName and roleArn are set,
 	// we are using AWS STS to assume a role and get temporary credentials
 	// if they are not set, we are using AWS IAM user credentials
@@ -29,23 +32,46 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	accessKeyId := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 
-	// AWSKeyspace/Cassandra configurations
-	awsKeyspace := getEnvChecked("AWS_KEYSPACE", log)
-	sslCertificatePath := getEnvChecked("SSL_CERTFILE", log)
+	var awsKeyspace, cassandraHost, cassandraUsername, cassandraPassword, sslCertificatePath string
+	var cassandraPort, postgresPort int
+	var postgresHost, postgresUser, postgresPassword, postgresDBName, postgresSSLMode string
+	if submissionStorage == "CASSANDRA" {
+		// AWSKeyspace/Cassandra configurations
+		awsKeyspace = os.Getenv("AWS_KEYSPACE")
+		sslCertificatePath = os.Getenv("SSL_CERTFILE")
 
-	//service level connection
-	cassandraHost := os.Getenv("CASSANDRA_HOST")
-	cassandraPortStr := os.Getenv("CASSANDRA_PORT")
-	cassandraPort, err := strconv.Atoi(cassandraPortStr)
-	if err != nil {
-		cassandraPort = 9142
+		//service level connection
+		cassandraHost = os.Getenv("CASSANDRA_HOST")
+		cassandraPortStr := os.Getenv("CASSANDRA_PORT")
+		var err error
+		cassandraPort, err = strconv.Atoi(cassandraPortStr)
+		if err != nil {
+			cassandraPort = 9142
+		}
+		cassandraUsername = os.Getenv("CASSANDRA_USERNAME")
+		cassandraPassword = os.Getenv("CASSANDRA_PASSWORD")
+	} else {
+		// PostgreSQL configurations
+		postgresHost = os.Getenv("POSTGRES_HOST")
+		postgresUser = os.Getenv("POSTGRES_USER")
+		postgresPassword = os.Getenv("POSTGRES_PASSWORD")
+		postgresDBName = os.Getenv("POSTGRES_DB")
+		var err error
+		postgresPort, err = strconv.Atoi(os.Getenv("POSTGRES_PORT"))
+		if err != nil {
+			log.Fatalf("Error parsing POSTGRES_PORT: %v", err)
+		}
+		postgresSSLMode = os.Getenv("POSTGRES_SSLMODE")
+		if postgresSSLMode == "" {
+			postgresSSLMode = "require"
+		}
+
 	}
-	cassandraUsername := os.Getenv("CASSANDRA_USERNAME")
-	cassandraPassword := os.Getenv("CASSANDRA_PASSWORD")
 
 	config.NetworkName = networkName
 	config.DelegationVerifyBinPath = delegationVerifyBinPath
 	config.NoChecks = noChecks
+	config.SubmissionStorage = submissionStorage
 	config.CassandraConfig = &CassandraConfig{
 		Keyspace:             awsKeyspace,
 		CassandraHost:        cassandraHost,
@@ -60,6 +86,14 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 		RoleArn:              roleArn,
 		SSLCertificatePath:   sslCertificatePath,
 	}
+	config.PostgreSQLConfig = &PostgreSQLConfig{
+		Host:     postgresHost,
+		Port:     postgresPort,
+		User:     postgresUser,
+		Password: postgresPassword,
+		DBName:   postgresDBName,
+		SSLMode:  postgresSSLMode,
+	}
 	config.AwsConfig = &AwsConfig{
 		BucketName:      bucketName,
 		Region:          awsRegion,
@@ -68,6 +102,25 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	}
 
 	return config
+}
+
+var validStorageOptions = map[string]bool{
+	"CASSANDRA": true,
+	"POSTGRES":  true,
+}
+
+func getSubmissionStorage() string {
+	storage := os.Getenv("SUBMISSION_STORAGE")
+	if storage == "" {
+		storage = "POSTGRES" // Set default to "POSTGRES"
+	}
+	storage = strings.ToUpper(storage)
+
+	// Validate the storage option
+	if _, valid := validStorageOptions[storage]; !valid {
+		log.Fatalf("Invalid storage option: %s. Valid options are %v", storage, validStorageOptions)
+	}
+	return storage
 }
 
 func getEnvChecked(variable string, log logging.EventLogger) string {
@@ -115,10 +168,21 @@ type CassandraConfig struct {
 	SSLCertificatePath   string `json:"ssl_certificate_path"`
 }
 
+type PostgreSQLConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	DBName   string `json:"dbname"`
+	SSLMode  string `json:"sslmode"`
+}
+
 type AppConfig struct {
-	NetworkName             string           `json:"network_name"`
-	DelegationVerifyBinPath string           `json:"delegation_verify_bin_path"`
-	NoChecks                bool             `json:"no_checks"`
-	AwsConfig               *AwsConfig       `json:"aws"`
-	CassandraConfig         *CassandraConfig `json:"cassandra_config"`
+	NetworkName             string            `json:"network_name"`
+	DelegationVerifyBinPath string            `json:"delegation_verify_bin_path"`
+	NoChecks                bool              `json:"no_checks"`
+	SubmissionStorage       string            `json:"submission_storage"`
+	AwsConfig               *AwsConfig        `json:"aws"`
+	CassandraConfig         *CassandraConfig  `json:"cassandra_config,omitempty"`
+	PostgreSQLConfig        *PostgreSQLConfig `json:"postgres_config,omitempty"`
 }
