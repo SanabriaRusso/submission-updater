@@ -61,7 +61,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 		if err != nil {
 			log.Fatalf("Error parsing POSTGRES_PORT: %v", err)
 		}
-		postgresSSLMode := os.Getenv("POSTGRES_SSLMODE")
+		postgresSSLMode = os.Getenv("POSTGRES_SSLMODE")
 		if postgresSSLMode == "" {
 			postgresSSLMode = "require"
 		}
