@@ -68,7 +68,6 @@ func main() {
 			log.Fatalf("Error updating submissions: %v", err)
 		}
 
-		log.Info("Invalid submissions:")
 		for _, sub := range verifiedSubmissions {
 			if sub.ValidationError != "" || !sub.Verified {
 				log.Infof("[INVALID] Submitter: %s, Block hash: %s, Submitted at: %s, Validation error: %s, Verified: %v",
