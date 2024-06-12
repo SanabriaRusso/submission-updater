@@ -18,6 +18,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	delegationVerifyBinPath := getEnvChecked("DELEGATION_VERIFY_BIN_PATH", log)
 	noChecks := boolEnvChecked("NO_CHECKS", log)
 	networkName := getEnvChecked("NETWORK_NAME", log)
+	genesisLedgerFile := os.Getenv("GENESIS_LEDGER_FILE")
 
 	// AWS configurations
 	bucketName := getEnvChecked("AWS_S3_BUCKET", log)
@@ -71,6 +72,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	config.NetworkName = networkName
 	config.DelegationVerifyBinPath = delegationVerifyBinPath
 	config.NoChecks = noChecks
+	config.GenesisLedgerFile = genesisLedgerFile
 	config.SubmissionStorage = submissionStorage
 	config.CassandraConfig = &CassandraConfig{
 		Keyspace:             awsKeyspace,
@@ -181,6 +183,7 @@ type AppConfig struct {
 	NetworkName             string            `json:"network_name"`
 	DelegationVerifyBinPath string            `json:"delegation_verify_bin_path"`
 	NoChecks                bool              `json:"no_checks"`
+	GenesisLedgerFile       string            `json:"genesis_ledger_file"`
 	SubmissionStorage       string            `json:"submission_storage"`
 	AwsConfig               *AwsConfig        `json:"aws"`
 	CassandraConfig         *CassandraConfig  `json:"cassandra_config,omitempty"`
