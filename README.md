@@ -18,6 +18,7 @@ $ make
   - `DELEGATION_VERIFY_BIN_PATH` - path to [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify) binary.
   - `NO_CHECKS` - if set to `1`, stateless verifier tool will run with `--no-checks` flag
   - `SUBMISSION_STORAGE` - Storage where submissions are kept. Valid options: `POSTGRES` or `CASSANDRA`. Default: `POSTGRES`.
+  - `GENESIS_LEDGER_FILE` - file path to genesis ledger file. This is input for stateless_verifier `--config-file` option. In principle it is optional, if set, stateless_verifier will be run with `--config-file GENESIS_LEDGER_FILE` option.
 
 **2. AWS Keyspaces/Cassandra Configuration**:
 
@@ -69,7 +70,10 @@ $ ./result/bin/cassandra-updater "2024-03-04 09:38:54.0+0000" "2024-03-04 09:45:
 
 We can build docker image containing both `submission-updater` and [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify). For that we need to feed build with `DUNE_PROFILE` and `MINA_BRANCH` env variables. `DUNE_PROFILE` is the profile in which the tool will be built (typically `devnet`). `MINA_BRANCH` indicates which branch of [Mina](https://github.com/MinaProtocol/mina) repository we want to build the tool from.
 
-The docker image already has `DELEGATION_VERIFY_BIN_PATH` and `SSL_CERTFILE` already set, so we only need to feed it with remaining config variables required for connecting to AWS Keyspaces / Cassandra.
+The docker image already has set: 
+ - `DELEGATION_VERIFY_BIN_PATH`
+ - `SSL_CERTFILE` 
+ - `GENESIS_LEDGER_FILE` with mainnet genesis_ledger file. In case different ledger file is required one can override it by passing GENESIS_LEDGER_FILE to the docker container via `-e GENESIS_LEDGER_FILE=/different/path/genesis.json`. 
 
 **Build**:
 

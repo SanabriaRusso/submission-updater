@@ -10,20 +10,31 @@ import (
 
 func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Submission, error) {
 	var cmd string
+
+	// Start building the command
+	cmd = fmt.Sprintf("%v stdin", command)
+
+	// Add --no-checks flag if needed
 	if ctx.AppConfig.NoChecks {
 		ctx.Log.Info("Note! Running with --no-checks flag. This will skip some checks.")
-		cmd = fmt.Sprintf("%v stdin --no-checks", command)
-	} else {
-		cmd = fmt.Sprintf("%v stdin", command)
+		cmd = fmt.Sprintf("%s --no-checks", cmd)
 	}
+
+	// Add --config-file flag if ConfigFile is specified
+	if ctx.AppConfig.GenesisLedgerFile != "" {
+		cmd = fmt.Sprintf("%s --config-file %s", cmd, ctx.AppConfig.GenesisLedgerFile)
+	}
+
 	out, err := runCommand(cmd, input)
 	if err != nil {
 		return nil, fmt.Errorf("error running %v: %w", command, err)
 	}
+
 	submissions, err := parseDelegationVerifyOutput(out)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing submissions: %w", err)
 	}
+
 	return submissions, nil
 }
 
@@ -38,6 +49,11 @@ func parseDelegationVerifyOutput(data string) ([]Submission, error) {
 	for _, record := range records {
 		if record == "" {
 			continue // Skip empty lines
+		}
+		// skip all lines that do not have submitted_at_date, which indicates optput is a submission
+		// and not a log line (when using --config-file flag, the output will contain additional log lines as well)
+		if !strings.Contains(record, "submitted_at_date") {
+			continue
 		}
 
 		var submission Submission

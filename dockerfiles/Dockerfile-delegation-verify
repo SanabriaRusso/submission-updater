@@ -10,11 +10,11 @@
 FROM gcr.io/o1labs-192920/mina-toolchain@sha256:c810338e2c3973f7c674d0607048725917ce2be23b949c4bc9760c01122f884b AS builder
 
 # Use --build-arg "DUNE_PROFILE=dev" to build a dev image or for CI
-ARG DUNE_PROFILE=devnet
+ARG DUNE_PROFILE=mainnet
 
 # branch to checkout on first clone (this will be the only availible branch in the container)
 # can also be a tagged release
-ARG MINA_BRANCH=delegation_verify_over_stdin_rc_base
+ARG MINA_BRANCH=berkeley
 
 # repo to checkout the branch from
 ARG MINA_REPO=https://github.com/MinaProtocol/mina
@@ -82,6 +82,7 @@ WORKDIR $GOPATH/src
 # Copy everything from the current directory to the PWD (Present Working Directory) inside the container
 COPY src src
 COPY database/cert/sf-class2-root.crt /root/.cassandra/sf-class2-root.crt
+COPY genesis_ledgers/mainnet.json /root/genesis_ledgers/mainnet.json
 
 # Download all the dependencies
 RUN cd src && go get -d -v ./...
@@ -91,6 +92,7 @@ RUN cd src && go install -v ./...
 
 ENV DELEGATION_VERIFY_BIN_PATH=/bin/delegation-verify
 ENV SSL_CERTFILE=/root/.cassandra/sf-class2-root.crt
+ENV GENESIS_LEDGER_FILE=/root/genesis_ledgers/mainnet.json
 
 # Run the executable
 ENTRYPOINT ["submission_updater"]
