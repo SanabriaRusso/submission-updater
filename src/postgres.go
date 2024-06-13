@@ -60,8 +60,9 @@ func (ctx *AppContext) updateSubmissionsPostgres(submissions []Submission) error
 	ctx.Log.Infof("Updating %d submissions", len(submissions))
 
 	for _, sub := range submissions {
+		// We nullify snark_work to keep the space usage low
 		query := `UPDATE submissions
-                  SET state_hash = $1, parent = $2, height = $3, slot = $4, validation_error = $5, verified = $6
+                  SET snark_work = NULL, state_hash = $1, parent = $2, height = $3, slot = $4, validation_error = $5, verified = $6
                   WHERE id = $7`
 		if _, err := ctx.PostgresSession.Exec(query,
 			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
