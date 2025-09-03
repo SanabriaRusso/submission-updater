@@ -2,7 +2,7 @@ with import (fetchTarball "https://nixos.org/channels/nixos-unstable/nixexprs.ta
 {
   devEnv = stdenv.mkDerivation {
     name = "dev";
-    buildInputs = [ stdenv go_1_21 glibc ];
+    buildInputs = [ stdenv go glibc ];
     shellHook = ''
       return
     '';
