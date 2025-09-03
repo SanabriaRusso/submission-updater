@@ -24,8 +24,8 @@ case "$1" in
       echo "Specify MINA_BRANCH env variable. (The branch to build the delegation-verify binary from)."
       exit 1
     fi
-    # set image name to 673156464838.dkr.ecr.us-west-2.amazonaws.com/uptime-service-backend if IMAGE_NAME is not set
-    IMAGE_NAME=${IMAGE_NAME:-673156464838.dkr.ecr.us-west-2.amazonaws.com/delegation-verify}
+    # set default image name for GitHub Container Registry if IMAGE_NAME is not set
+    IMAGE_NAME=${IMAGE_NAME:-ghcr.io/sanabriarusso/submission-updater}
     docker build --build-arg "MINA_BRANCH=$MINA_BRANCH" --build-arg "DUNE_PROFILE=$DUNE_PROFILE" -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
     ;;
   docker-standalone)
@@ -33,8 +33,8 @@ case "$1" in
       echo "Specify TAG env variable."
       exit 1
     fi
-    # set image name to 673156464838.dkr.ecr.us-west-2.amazonaws.com/uptime-service-backend if IMAGE_NAME is not set
-    IMAGE_NAME=${IMAGE_NAME:-673156464838.dkr.ecr.us-west-2.amazonaws.com/submission-updater}
+    # set default image name for GitHub Container Registry if IMAGE_NAME is not set
+    IMAGE_NAME=${IMAGE_NAME:-ghcr.io/sanabriarusso/submission-updater}
     docker build -f dockerfiles/Dockerfile-standalone -t "$IMAGE_NAME:$TAG" .
     ;;
   "")
