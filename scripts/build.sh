@@ -25,7 +25,7 @@ case "$1" in
       exit 1
     fi
     # set default image name for GitHub Container Registry if IMAGE_NAME is not set
-    IMAGE_NAME=${IMAGE_NAME:-ghcr.io/sanabriarusso/submission-updater}
+    IMAGE_NAME=${IMAGE_NAME:-ghcr.io/o1-labs/submission-updater}
     docker build --build-arg "MINA_BRANCH=$MINA_BRANCH" --build-arg "DUNE_PROFILE=$DUNE_PROFILE" -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
     ;;
   docker-standalone)
@@ -34,7 +34,7 @@ case "$1" in
       exit 1
     fi
     # set default image name for GitHub Container Registry if IMAGE_NAME is not set
-    IMAGE_NAME=${IMAGE_NAME:-ghcr.io/sanabriarusso/submission-updater}
+    IMAGE_NAME=${IMAGE_NAME:-ghcr.io/o1-labs/submission-updater}
     docker build -f dockerfiles/Dockerfile-standalone -t "$IMAGE_NAME:$TAG" .
     ;;
   "")

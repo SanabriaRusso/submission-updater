@@ -54,7 +54,7 @@ TAG=1.0 make docker-standalone
 # With stateless verifier binary included
 TAG=1.0 DUNE_PROFILE=devnet MINA_BRANCH=delegation_verify_over_stdin_rc_base make docker-delegation-verify
 
-# Custom image names (defaults to ghcr.io/sanabriarusso/submission-updater)
+# Custom image names (defaults to ghcr.io/o1-labs/submission-updater)
 IMAGE_NAME=custom-registry/my-image TAG=1.0 make docker-standalone
 ```
 
