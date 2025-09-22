@@ -1,35 +1,35 @@
-name: Build
+  name: Build
 
-on:
-  push:
-    branches: 
-      - main
-    tags:
-      - '*'
-  pull_request:
-    branches: 
-      - main
+  on:
+    push:
+      branches: 
+        - main
+      tags:
+        - '*'
+    pull_request:
+      branches: 
+        - main
 
-jobs:
-  build:
-    runs-on: minafoundation-default-runners
+  jobs:
+    build:
+      runs-on: ubuntu-latest
 
-    steps:
-    - name: 📥 Checkout
-      uses: actions/checkout@v3    
+      steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
 
-    - name: 📦 Install Nix
-      uses: cachix/install-nix-action@v22
-      with:
-        nix_path: nixpkgs=channel:nixos-unstable
+      - name: 📦 Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
 
-    - name: 🛠️ Build
-      run: nix-shell --run "make build"
+      - name: 🛠️ Build
+        run: nix-shell --run "make build"
 
-    - name: 🛠️ Build Docker (submission-updater)
-      env:
-        TAG: uptime-service-backend-test
-      run: nix-shell --run "make docker-standalone"
+      - name: 🛠️ Build Docker (submission-updater)
+        env:
+          TAG: uptime-service-backend-test
+        run: nix-shell --run "make docker-standalone"
 
-    - name: 🧪 Test
-      run: nix-shell --run "make test"
+      - name: 🧪 Test
+        run: nix-shell --run "make test"

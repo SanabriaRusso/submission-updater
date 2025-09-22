@@ -19,8 +19,8 @@ on:
         required: true
         default: 'devnet'
 env:
-  ECR_REPOSITORY_URL: 673156464838.dkr.ecr.us-west-2.amazonaws.com
-  ECR_REPOSITORY_NAME: delegation-verify
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
   DOCKER_TAG_PREFIX: ${{ github.event.inputs.docker_tag_prefix }}
   MINA_BRANCH: ${{ github.event.inputs.mina_branch }}
   DUNE_PROFILE: ${{ github.event.inputs.dune_profile }}
@@ -33,13 +33,13 @@ concurrency:
 jobs:
   build-docker-image:
     name: Build and Push Docker Image
-    runs-on: minafoundation-default-runners
+    runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: 🏷️ Generate Tag
+      - name: 🏷️ Generate Tag and Image Name
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             PREFIX=${{ env.DOCKER_TAG_PREFIX }}
@@ -50,27 +50,31 @@ jobs:
             exit 1
           fi
           echo "TAG=$PREFIX-$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
-      - name: 🔑 ECR Login
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      - name: 🔍 Check if Tag already exists
-        id: checktag
-        uses: tyriis/docker-image-tag-exists@v2.0.1
+          # Convert repository name to lowercase for Docker registry compatibility
+          echo "IMAGE_NAME_LOWER=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      - name: 🔑 Log in to Container Registry
+        uses: docker/login-action@v3
         with:
-          registry: ${{ env.ECR_REPOSITORY_URL}}
-          repository: ${{ env.ECR_REPOSITORY_NAME }}
-          tag: ${{ env.TAG }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔍 Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}
+          tags: |
+            type=raw,value=${{ env.TAG }}
       - name: 📦 Install Nix
-        uses: cachix/install-nix-action@v22
+        uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-      - name: 🛠️ Build Uptime Service Backend Docker Image
-        if: steps.checktag.outputs.tag == 'not found'
+      - name: 🛠️ Build Docker Image
         run: |
           TAG=${{ env.TAG }}
           MINA_BRANCH=${{ env.MINA_BRANCH }}
           DUNE_PROFILE=${{ env.DUNE_PROFILE }}
+          IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}
           nix-shell --run "make docker-delegation-verify"
-      - name: 🚚 Push Uptime Service Backend Docker Image
-        if: steps.checktag.outputs.tag == 'not found'
-        run: docker push ${{ env.ECR_REPOSITORY_URL}}/${{ env.ECR_REPOSITORY_NAME }}:${{ env.TAG }}
+      - name: 🚚 Push Docker Image
+        run: docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:${{ env.TAG }}
