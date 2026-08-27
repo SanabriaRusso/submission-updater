@@ -117,6 +117,13 @@ RUN if [ -n "$MINA_BRANCH_POST_FORK" ]; then \
     touch /bin/delegation-verify-post-fork; \
     fi
 
+# Devnet rehearsal: ledger tarball sources.
+# The public S3 ledger mirror serves a stale staking epoch ledger for post-Mesa
+# devnet ("Ledger root mismatch"); the daemon images bake the correct tarballs
+# in /var/lib/coda, which is delegation-verify's first ledger search path.
+FROM europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-daemon:3.5.0-devnet-stop-slot-compatible-849edfa-bookworm-devnet AS devnet-ledgers-pre
+FROM europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-daemon:4.0.0-devnet-mesa-release-mesa-6965b50-bullseye-devnet AS devnet-ledgers-post
+
 # Runtime image
 FROM golang:1.22-bullseye
 
@@ -150,6 +157,8 @@ COPY database/cert/sf-class2-root.crt /root/.cassandra/sf-class2-root.crt
 # copy the whole directory so mainnet-post-fork.json (committed on hard-fork day)
 # rides along automatically once it exists
 COPY genesis_ledgers/ /root/genesis_ledgers/
+COPY --from=devnet-ledgers-pre /var/lib/coda/*.tar.gz /var/lib/coda/
+COPY --from=devnet-ledgers-post /var/lib/coda/*.tar.gz /var/lib/coda/
 
 # Download all the dependencies
 RUN cd src && go get -d -v ./...
