@@ -7,7 +7,7 @@
 # Builder image
 # publish date: 2025-09-03
 # gcloud container images list-tags gcr.io/o1labs-192920/mina-toolchain --format=json --filter="digest=sha256:c810338e2c3973f7c674d0607048725917ce2be23b949c4bc9760c01122f884b"
-FROM gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792 AS builder
+FROM europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-toolchain:f009c00-bullseye-devnet AS builder
 
 # Use --build-arg "DUNE_PROFILE=dev" to build a dev image or for CI
 ARG DUNE_PROFILE=mainnet
@@ -60,7 +60,7 @@ RUN cp ./delegation-verify /bin/delegation-verify
 #   is produced instead so the runtime COPY always succeeds)
 #################################################################################################
 
-FROM gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792 AS builder-post-fork
+FROM europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-toolchain:f009c00-bullseye-devnet AS builder-post-fork
 
 # Use --build-arg "DUNE_PROFILE_POST_FORK=dev" to build a dev image or for CI
 ARG DUNE_PROFILE_POST_FORK=mainnet
@@ -164,8 +164,8 @@ ARG FORK_CUTOVER_TIME=""
 ENV DELEGATION_VERIFY_BIN_PATH=/bin/delegation-verify
 ENV DELEGATION_VERIFY_BIN_PATH_POST_FORK=/bin/delegation-verify-post-fork
 ENV SSL_CERTFILE=/root/.cassandra/sf-class2-root.crt
-ENV GENESIS_LEDGER_FILE=/root/genesis_ledgers/mainnet.json
-ENV GENESIS_LEDGER_FILE_POST_FORK=/root/genesis_ledgers/mainnet-post-fork.json
+ENV GENESIS_LEDGER_FILE=/root/genesis_ledgers/devnet.json
+ENV GENESIS_LEDGER_FILE_POST_FORK=/root/genesis_ledgers/devnet-post-fork.json
 ENV FORK_CUTOVER_TIME=${FORK_CUTOVER_TIME}
 
 # Run the executable
