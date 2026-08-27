@@ -195,6 +195,30 @@ func TestRunDualDelegationVerifySkipsEmptyPartition(t *testing.T) {
 	}
 }
 
+func TestRunDualDelegationVerifySkipsEmptyPreForkPartition(t *testing.T) {
+	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	preBin, preArgsFile := writeStubVerifier(t, dir, "delegation-verify-pre-fork", "pre-fork-stub")
+	postBin, _ := writeStubVerifier(t, dir, "delegation-verify-post-fork", "post-fork-stub")
+	appCtx := newTestAppContext(cutover, preBin, postBin)
+
+	// all submissions are at/after the cutover, so the pre-fork stub must not be invoked
+	submissions := []Submission{
+		{ID: "post-1", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(time.Hour), Submitter: "B62post1"},
+	}
+
+	verifiedSubmissions, err := appCtx.runDualDelegationVerify(submissions)
+	if err != nil {
+		t.Fatalf("runDualDelegationVerify() error = %v", err)
+	}
+	if len(verifiedSubmissions) != 1 || verifiedSubmissions[0].ValidationError != "post-fork-stub" {
+		t.Errorf("runDualDelegationVerify() = %v, want single submission processed by post-fork-stub", verifiedSubmissions)
+	}
+	if _, err := os.Stat(preArgsFile); !os.IsNotExist(err) {
+		t.Errorf("pre-fork stub was invoked for an empty partition")
+	}
+}
+
 func assertStubArgs(t *testing.T, argsFile, want string) {
 	t.Helper()
 	args, err := os.ReadFile(argsFile)
