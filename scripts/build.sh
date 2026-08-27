@@ -26,7 +26,16 @@ case "$1" in
     fi
     # set default image name for GitHub Container Registry if IMAGE_NAME is not set
     IMAGE_NAME=${IMAGE_NAME:-ghcr.io/o1-labs/submission-updater}
-    docker build --build-arg "MINA_BRANCH=$MINA_BRANCH" --build-arg "DUNE_PROFILE=$DUNE_PROFILE" -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
+    # Optional post-hard-fork (Mesa) build args. When MINA_BRANCH_POST_FORK is
+    # empty the post-fork builder stage is skipped and the image is identical
+    # to a single-binary build.
+    docker build \
+      --build-arg "MINA_BRANCH=$MINA_BRANCH" \
+      --build-arg "DUNE_PROFILE=$DUNE_PROFILE" \
+      --build-arg "MINA_BRANCH_POST_FORK=${MINA_BRANCH_POST_FORK:-}" \
+      --build-arg "DUNE_PROFILE_POST_FORK=${DUNE_PROFILE_POST_FORK:-mainnet}" \
+      --build-arg "FORK_CUTOVER_TIME=${FORK_CUTOVER_TIME:-}" \
+      -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
     ;;
   docker-standalone)
     if [[ "$TAG" == "" ]]; then

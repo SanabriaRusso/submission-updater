@@ -74,6 +74,7 @@ The docker image already has set:
  - `DELEGATION_VERIFY_BIN_PATH`
  - `SSL_CERTFILE` 
  - `GENESIS_LEDGER_FILE` with mainnet genesis_ledger file. In case different ledger file is required one can override it by passing GENESIS_LEDGER_FILE to the docker container via `-e GENESIS_LEDGER_FILE=/different/path/genesis.json`. 
+ - `DELEGATION_VERIFY_BIN_PATH_POST_FORK`, `GENESIS_LEDGER_FILE_POST_FORK` and `FORK_CUTOVER_TIME` for dual-binary (pre/post-hard-fork) images — see below.
 
 **Build**:
 
@@ -82,6 +83,38 @@ $ nix-shell
 $ TAG=1.0 \
   DUNE_PROFILE=devnet \
   MINA_BRANCH=delegation_verify_over_stdin_rc_base \
+  make docker-delegation-verify
+```
+
+### Dual-binary (pre/post-hard-fork) builds
+
+For the Mina "Mesa" hard fork a single image can carry **two** `delegation-verify` binaries — the pre-fork one (built from `MINA_BRANCH`, exactly as before) and a post-fork one. The post-fork build is controlled by three optional env variables (threaded through as docker build args):
+
+ - `MINA_BRANCH_POST_FORK` - branch (or tagged release) of [Mina](https://github.com/MinaProtocol/mina) to build the post-fork binary from. **Empty (the default) disables the post-fork build entirely** and the resulting image is identical to a single-binary build (plus an empty placeholder file at the post-fork binary path).
+ - `DUNE_PROFILE_POST_FORK` - dune profile for the post-fork build (default `mainnet`).
+ - `FORK_CUTOVER_TIME` - RFC3339 timestamp of the hard fork, baked into the image as the `FORK_CUTOVER_TIME` env variable. Empty (the default) keeps dual mode off — the wrapper behaves exactly as today.
+
+The same three knobs are exposed as optional `workflow_dispatch` inputs of the Publish workflow (`mina_branch_post_fork`, `dune_profile_post_fork`, `fork_cutover_time`).
+
+Resulting image layout:
+
+ - `/bin/delegation-verify` - pre-fork binary (`DELEGATION_VERIFY_BIN_PATH`)
+ - `/bin/delegation-verify-post-fork` - post-fork binary (`DELEGATION_VERIFY_BIN_PATH_POST_FORK`)
+ - `/root/genesis_ledgers/mainnet.json` - pre-fork config file (`GENESIS_LEDGER_FILE`)
+ - `/root/genesis_ledgers/mainnet-post-fork.json` - post-fork config file (`GENESIS_LEDGER_FILE_POST_FORK`)
+
+The whole `genesis_ledgers/` directory is copied into the image, so `mainnet-post-fork.json` will ride along automatically once it is committed. That file (and the actual `FORK_CUTOVER_TIME` value) only become available when the hard-fork artifacts are published on hard-fork day — until then dual-binary images can already be built and deployed with `FORK_CUTOVER_TIME` unset, in which case only the pre-fork binary is used.
+
+Example dual-binary build:
+
+```
+$ nix-shell
+$ TAG=1.0 \
+  DUNE_PROFILE=devnet \
+  MINA_BRANCH=delegation_verify_over_stdin_rc_base \
+  MINA_BRANCH_POST_FORK=mesa \
+  DUNE_PROFILE_POST_FORK=devnet \
+  FORK_CUTOVER_TIME=2026-09-03T00:00:00Z \
   make docker-delegation-verify
 ```
 

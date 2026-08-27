@@ -53,11 +53,76 @@ USER root
 # copy binary to /bin
 RUN cp ./delegation-verify /bin/delegation-verify
 
+#################################################################################################
+# The post-hard-fork "stateless verification build" Stage
+# - builds the post-hard-fork (Mesa) stateless verification tool
+# - skipped entirely when MINA_BRANCH_POST_FORK is empty (an empty placeholder
+#   is produced instead so the runtime COPY always succeeds)
+#################################################################################################
+
+FROM gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792 AS builder-post-fork
+
+# Use --build-arg "DUNE_PROFILE_POST_FORK=dev" to build a dev image or for CI
+ARG DUNE_PROFILE_POST_FORK=mainnet
+
+# branch (or tagged release) to build the post-hard-fork binary from
+# when empty (the default) this stage builds nothing and only emits a placeholder
+ARG MINA_BRANCH_POST_FORK=""
+
+# repo to checkout the branch from
+ARG MINA_REPO=https://github.com/MinaProtocol/mina
+
+# location of repo used for pins and external package commits
+ARG MINA_DIR=mina
+
+ENV PATH "$PATH:/usr/lib/go/bin:$HOME/.cargo/bin"
+
+# git will clone into an empty dir, but this also helps us set the workdir in advance
+RUN if [ -n "$MINA_BRANCH_POST_FORK" ]; then \
+    cd $HOME && rm -rf $HOME/${MINA_DIR} \
+    && git clone \
+    -b "${MINA_BRANCH_POST_FORK}" \
+    --depth 1 \
+    --shallow-submodules \
+    --recurse-submodules \
+    ${MINA_REPO} ${HOME}/${MINA_DIR} \
+    ; fi
+
+WORKDIR $HOME/${MINA_DIR}
+
+RUN if [ -n "$MINA_BRANCH_POST_FORK" ]; then \
+    git submodule sync && git submodule update --init --recursive \
+    ; fi
+
+RUN mkdir -p ${HOME}/app
+
+# HACK: build without special cpu features to allow more people to run delegation verification tool
+# RUN ./scripts/zexe-standardize.sh
+
+RUN if [ -n "$MINA_BRANCH_POST_FORK" ]; then \
+    eval $(opam config env) \
+    && dune build --profile=${DUNE_PROFILE_POST_FORK} \
+    src/app/delegation_verify/delegation_verify.exe \
+    && cp _build/default/src/app/delegation_verify/delegation_verify.exe ./delegation-verify \
+    && rm -rf _build \
+    ; fi
+
+USER root
+
+# copy binary to /bin (empty placeholder when the post-fork build is skipped,
+# so the runtime stage COPY below never fails)
+RUN if [ -n "$MINA_BRANCH_POST_FORK" ]; then \
+    cp ./delegation-verify /bin/delegation-verify-post-fork; \
+    else \
+    touch /bin/delegation-verify-post-fork; \
+    fi
+
 # Runtime image
 FROM golang:1.22-bullseye
 
 # Copy resources from builder to runtime image
 COPY --from=builder /bin/delegation-verify /bin/delegation-verify
+COPY --from=builder-post-fork /bin/delegation-verify-post-fork /bin/delegation-verify-post-fork
 
 RUN apt-get update && apt-get install -y jq libjemalloc2 wget dnsutils gawk
 
@@ -82,7 +147,9 @@ WORKDIR $GOPATH/src
 # Copy everything from the current directory to the PWD (Present Working Directory) inside the container
 COPY src src
 COPY database/cert/sf-class2-root.crt /root/.cassandra/sf-class2-root.crt
-COPY genesis_ledgers/mainnet.json /root/genesis_ledgers/mainnet.json
+# copy the whole directory so mainnet-post-fork.json (committed on hard-fork day)
+# rides along automatically once it exists
+COPY genesis_ledgers/ /root/genesis_ledgers/
 
 # Download all the dependencies
 RUN cd src && go get -d -v ./...
@@ -90,9 +157,16 @@ RUN cd src && go get -d -v ./...
 # Install the package
 RUN cd src && go install -v ./...
 
+# RFC3339 hard-fork cutover time; empty (the default) keeps dual mode off and
+# the wrapper behaves exactly as today
+ARG FORK_CUTOVER_TIME=""
+
 ENV DELEGATION_VERIFY_BIN_PATH=/bin/delegation-verify
+ENV DELEGATION_VERIFY_BIN_PATH_POST_FORK=/bin/delegation-verify-post-fork
 ENV SSL_CERTFILE=/root/.cassandra/sf-class2-root.crt
 ENV GENESIS_LEDGER_FILE=/root/genesis_ledgers/mainnet.json
+ENV GENESIS_LEDGER_FILE_POST_FORK=/root/genesis_ledgers/mainnet-post-fork.json
+ENV FORK_CUTOVER_TIME=${FORK_CUTOVER_TIME}
 
 # Run the executable
 ENTRYPOINT ["submission_updater"]
