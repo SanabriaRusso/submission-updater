@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
-func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Submission, error) {
+func (ctx *AppContext) runDelegationVerifyCommand(command, configFile, input string) ([]Submission, error) {
 	var cmd string
 
 	// Start building the command
@@ -20,9 +21,9 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 		cmd = fmt.Sprintf("%s --no-checks", cmd)
 	}
 
-	// Add --config-file flag if ConfigFile is specified
-	if ctx.AppConfig.GenesisLedgerFile != "" {
-		cmd = fmt.Sprintf("%s --config-file %s", cmd, ctx.AppConfig.GenesisLedgerFile)
+	// Add --config-file flag if configFile is specified
+	if configFile != "" {
+		cmd = fmt.Sprintf("%s --config-file %s", cmd, configFile)
 	}
 
 	out, err := runCommand(cmd, input)
@@ -36,6 +37,61 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 	}
 
 	return submissions, nil
+}
+
+// verifySubmissions marshals the given submissions and runs them through the
+// delegation verification binary at binPath with the given config file.
+func (ctx *AppContext) verifySubmissions(submissions []Submission, binPath, configFile string) ([]Submission, error) {
+	submissionsJSON, err := json.Marshal(submissions)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling submissions to JSON: %w", err)
+	}
+	return ctx.runDelegationVerifyCommand(binPath, configFile, string(submissionsJSON))
+}
+
+// partitionSubmissionsByCutover splits submissions into pre-fork (submitted_at
+// before the cutover) and post-fork (submitted_at at or after the cutover).
+func partitionSubmissionsByCutover(submissions []Submission, cutover time.Time) (preFork, postFork []Submission) {
+	for _, submission := range submissions {
+		if submission.SubmittedAt.Before(cutover) {
+			preFork = append(preFork, submission)
+		} else {
+			postFork = append(postFork, submission)
+		}
+	}
+	return preFork, postFork
+}
+
+// runDualDelegationVerify partitions submissions at the fork cutover time and
+// runs each non-empty partition through its corresponding delegation-verify
+// binary (pre-fork or post-fork), returning the merged results.
+func (ctx *AppContext) runDualDelegationVerify(submissions []Submission) ([]Submission, error) {
+	cfg := ctx.AppConfig
+	preFork, postFork := partitionSubmissionsByCutover(submissions, *cfg.ForkCutoverTime)
+	ctx.Log.Infof("Dual-verifier mode (cutover %v): %v pre-fork submissions, %v post-fork submissions",
+		cfg.ForkCutoverTime.Format(time.RFC3339), len(preFork), len(postFork))
+
+	var verifiedSubmissions []Submission
+	if len(preFork) > 0 {
+		verified, err := ctx.verifySubmissions(preFork, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+		if err != nil {
+			return nil, fmt.Errorf("error verifying pre-fork submissions: %w", err)
+		}
+		verifiedSubmissions = append(verifiedSubmissions, verified...)
+	} else {
+		ctx.Log.Info("No pre-fork submissions, skipping pre-fork verification run")
+	}
+	if len(postFork) > 0 {
+		verified, err := ctx.verifySubmissions(postFork, cfg.DelegationVerifyBinPathPostFork, cfg.GenesisLedgerFilePostFork)
+		if err != nil {
+			return nil, fmt.Errorf("error verifying post-fork submissions: %w", err)
+		}
+		verifiedSubmissions = append(verifiedSubmissions, verified...)
+	} else {
+		ctx.Log.Info("No post-fork submissions, skipping post-fork verification run")
+	}
+
+	return verifiedSubmissions, nil
 }
 
 // Output from the delegation verification binary is expected to be a newline-separated JSON array of Submission objects.

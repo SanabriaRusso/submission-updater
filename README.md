@@ -19,6 +19,9 @@ $ make
   - `NO_CHECKS` - if set to `1`, stateless verifier tool will run with `--no-checks` flag
   - `SUBMISSION_STORAGE` - Storage where submissions are kept. Valid options: `POSTGRES` or `CASSANDRA`. Default: `POSTGRES`.
   - `GENESIS_LEDGER_FILE` - file path to genesis ledger file. This is input for stateless_verifier `--config-file` option. In principle it is optional, if set, stateless_verifier will be run with `--config-file GENESIS_LEDGER_FILE` option.
+  - `FORK_CUTOVER_TIME` - optional RFC3339 timestamp (e.g. `2026-09-03T00:00:00Z`) marking a hard fork cutover. When set, dual-verifier mode is enabled: submissions with `submitted_at >= FORK_CUTOVER_TIME` are verified with the post-fork binary (`DELEGATION_VERIFY_BIN_PATH_POST_FORK`), while submissions with `submitted_at < FORK_CUTOVER_TIME` are verified with the pre-fork binary (`DELEGATION_VERIFY_BIN_PATH`). When unset, behavior is unchanged and only `DELEGATION_VERIFY_BIN_PATH` is used.
+  - `DELEGATION_VERIFY_BIN_PATH_POST_FORK` - path to the post-fork stateless verifier tool binary. Required when `FORK_CUTOVER_TIME` is set.
+  - `GENESIS_LEDGER_FILE_POST_FORK` - optional file path to the post-fork genesis ledger file, passed as `--config-file` to the post-fork binary (analogous to `GENESIS_LEDGER_FILE`, which remains the pre-fork config).
 
 **2. AWS Keyspaces/Cassandra Configuration**:
 

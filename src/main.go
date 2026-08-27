@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -27,6 +26,10 @@ func main() {
 	log.Info("Submission Updater started...")
 	log.Info("Using SUBMISSION_STORAGE: ", appCfg.SubmissionStorage)
 	log.Infof("Using DELEGATION_VERIFY_BIN_PATH: %v", appCfg.DelegationVerifyBinPath)
+	if appCfg.ForkCutoverTime != nil {
+		log.Infof("Using DELEGATION_VERIFY_BIN_PATH_POST_FORK: %v", appCfg.DelegationVerifyBinPathPostFork)
+		log.Infof("Using FORK_CUTOVER_TIME: %v", appCfg.ForkCutoverTime.Format(time.RFC3339))
+	}
 
 	appCtx, err := NewAppContext(ctx, appCfg, log)
 	if err != nil {
@@ -51,15 +54,20 @@ func main() {
 		submissions = appCtx.addMissingBlocksFromS3(ctx, submissions, appCfg)
 
 		log.Info("Running delegation verification...")
-		submissionsJSON, err := json.Marshal(submissions)
-		if err != nil {
-			log.Fatalf("Error marshaling submissions to JSON: %v", err)
-		}
-
-		// Run the delegation verification binary
-		verifiedSubmissions, err := appCtx.runDelegationVerifyCommand(appCfg.DelegationVerifyBinPath, string(submissionsJSON))
-		if err != nil {
-			log.Fatalf("Error running command: %v", err)
+		var verifiedSubmissions []Submission
+		if appCfg.ForkCutoverTime != nil {
+			// Dual-verifier mode: route each submission to the pre- or
+			// post-fork binary based on its submitted_at timestamp
+			verifiedSubmissions, err = appCtx.runDualDelegationVerify(submissions)
+			if err != nil {
+				log.Fatalf("Error running command: %v", err)
+			}
+		} else {
+			// Run the delegation verification binary
+			verifiedSubmissions, err = appCtx.verifySubmissions(submissions, appCfg.DelegationVerifyBinPath, appCfg.GenesisLedgerFile)
+			if err != nil {
+				log.Fatalf("Error running command: %v", err)
+			}
 		}
 
 		// Update the submissions
