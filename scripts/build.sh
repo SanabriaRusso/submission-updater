@@ -24,9 +24,22 @@ case "$1" in
       echo "Specify MINA_BRANCH env variable. (The branch to build the delegation-verify binary from)."
       exit 1
     fi
+    if [[ "$FORK_CUTOVER_TIME" != "" && "$MINA_BRANCH_POST_FORK" == "" ]]; then
+      echo "FORK_CUTOVER_TIME is set but MINA_BRANCH_POST_FORK is empty; refusing to build a dual-mode image without a post-fork binary."
+      exit 1
+    fi
     # set default image name for GitHub Container Registry if IMAGE_NAME is not set
     IMAGE_NAME=${IMAGE_NAME:-ghcr.io/o1-labs/submission-updater}
-    docker build --build-arg "MINA_BRANCH=$MINA_BRANCH" --build-arg "DUNE_PROFILE=$DUNE_PROFILE" -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
+    # Optional post-hard-fork (Mesa) build args. When MINA_BRANCH_POST_FORK is
+    # empty the post-fork builder stage is skipped and the image is identical
+    # to a single-binary build.
+    docker build \
+      --build-arg "MINA_BRANCH=$MINA_BRANCH" \
+      --build-arg "DUNE_PROFILE=$DUNE_PROFILE" \
+      --build-arg "MINA_BRANCH_POST_FORK=${MINA_BRANCH_POST_FORK:-}" \
+      --build-arg "DUNE_PROFILE_POST_FORK=${DUNE_PROFILE_POST_FORK:-mainnet}" \
+      --build-arg "FORK_CUTOVER_TIME=${FORK_CUTOVER_TIME:-}" \
+      -f dockerfiles/Dockerfile-delegation-verify -t "$IMAGE_NAME:$TAG" .
     ;;
   docker-standalone)
     if [[ "$TAG" == "" ]]; then
