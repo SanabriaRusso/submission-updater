@@ -24,6 +24,10 @@ case "$1" in
       echo "Specify MINA_BRANCH env variable. (The branch to build the delegation-verify binary from)."
       exit 1
     fi
+    if [[ "$FORK_CUTOVER_TIME" != "" && "$MINA_BRANCH_POST_FORK" == "" ]]; then
+      echo "FORK_CUTOVER_TIME is set but MINA_BRANCH_POST_FORK is empty; refusing to build a dual-mode image without a post-fork binary."
+      exit 1
+    fi
     # set default image name for GitHub Container Registry if IMAGE_NAME is not set
     IMAGE_NAME=${IMAGE_NAME:-ghcr.io/o1-labs/submission-updater}
     # Optional post-hard-fork (Mesa) build args. When MINA_BRANCH_POST_FORK is
