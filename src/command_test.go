@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -83,5 +85,26 @@ func TestBoundedBufferKeepsTail(t *testing.T) {
 	small.Write([]byte("hi\n"))
 	if got := small.String(); got != "hi" {
 		t.Errorf("String() = %q, want %q unmarked", got, "hi")
+	}
+}
+
+func TestRunCommandKeepsOutputWrittenBeforeFailure(t *testing.T) {
+	// Records emitted before the process died belong to nodes that did nothing
+	// wrong, so the caller must still be able to see them.
+	path := filepath.Join(t.TempDir(), "dies-partway")
+	script := "#!/bin/sh\ncat > /dev/null\necho 'partial record'\necho 'boom' >&2\nexit 2\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing stub: %v", err)
+	}
+
+	stdout, stderr, err := runCommand(path, "")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(stdout, "partial record") {
+		t.Errorf("stdout written before the failure was dropped, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "boom") {
+		t.Errorf("stderr was dropped, got %q", stderr)
 	}
 }

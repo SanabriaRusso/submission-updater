@@ -90,11 +90,14 @@ func runCommand(command, input string) (stdout string, stderr string, err error)
 	cmd.Stdout = &outBuf
 	cmd.Stderr = errBuf
 
+	// Return whatever was written even on failure. A verifier that dies partway
+	// through has already emitted complete records for the submissions it got to,
+	// and those belong to nodes that did nothing wrong.
 	if err := cmd.Run(); err != nil {
 		if msg := errBuf.String(); msg != "" {
-			return "", msg, fmt.Errorf("failed to run command: %w: %s", err, msg)
+			return outBuf.String(), msg, fmt.Errorf("failed to run command: %w: %s", err, msg)
 		}
-		return "", "", fmt.Errorf("failed to run command: %w", err)
+		return outBuf.String(), "", fmt.Errorf("failed to run command: %w", err)
 	}
 
 	return outBuf.String(), errBuf.String(), nil
