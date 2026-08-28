@@ -25,7 +25,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	// dual-verifier (hard fork cutover) configuration
 	delegationVerifyBinPathPostFork := os.Getenv("DELEGATION_VERIFY_BIN_PATH_POST_FORK")
 	genesisLedgerFilePostFork := os.Getenv("GENESIS_LEDGER_FILE_POST_FORK")
-	forkCutoverTime, err := parseForkCutoverConfig(os.Getenv("FORK_CUTOVER_TIME"), delegationVerifyBinPathPostFork)
+	forkCutoverTime, err := parseForkCutoverConfig(os.Getenv("FORK_CUTOVER_TIME"), delegationVerifyBinPathPostFork, genesisLedgerFilePostFork)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -121,9 +121,15 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 
 // parseForkCutoverConfig validates the dual-verifier (hard fork cutover) settings.
 // An empty cutover means dual-verifier mode is disabled and nil is returned.
-// When the cutover is set, it must be a valid RFC3339 timestamp and the
-// post-fork delegation-verify binary path must be set as well.
-func parseForkCutoverConfig(cutover, postForkBinPath string) (*time.Time, error) {
+// When the cutover is set, it must be a valid RFC3339 timestamp and both the
+// post-fork delegation-verify binary and the post-fork genesis ledger file must
+// be set: the post-fork verification keys derive from the runtime config's fork
+// constants, so without --config-file the post-fork binary falls back to
+// compiled-in constants (fork = None) and rejects every post-fork submission.
+// Both paths are also validated on disk at startup, since with the cutover set
+// ahead of the fork they are not exercised until fork day and a typo would
+// otherwise stay invisible for weeks.
+func parseForkCutoverConfig(cutover, postForkBinPath, postForkConfigPath string) (*time.Time, error) {
 	if cutover == "" {
 		return nil, nil
 	}
@@ -134,7 +140,37 @@ func parseForkCutoverConfig(cutover, postForkBinPath string) (*time.Time, error)
 	if postForkBinPath == "" {
 		return nil, fmt.Errorf("missing DELEGATION_VERIFY_BIN_PATH_POST_FORK environment variable (required when FORK_CUTOVER_TIME is set)")
 	}
+	if postForkConfigPath == "" {
+		return nil, fmt.Errorf("missing GENESIS_LEDGER_FILE_POST_FORK environment variable (required when FORK_CUTOVER_TIME is set: without --config-file the post-fork binary runs with pre-fork constants and fails all post-fork submissions)")
+	}
+	if err := checkPostForkFiles(postForkBinPath, postForkConfigPath); err != nil {
+		return nil, err
+	}
 	return &cutoverTime, nil
+}
+
+// checkPostForkFiles verifies at startup that the post-fork delegation-verify
+// binary and genesis ledger file exist, are regular files, and that the binary
+// is executable.
+func checkPostForkFiles(postForkBinPath, postForkConfigPath string) error {
+	binInfo, err := os.Stat(postForkBinPath)
+	if err != nil {
+		return fmt.Errorf("DELEGATION_VERIFY_BIN_PATH_POST_FORK: cannot stat %s: %v", postForkBinPath, err)
+	}
+	if !binInfo.Mode().IsRegular() {
+		return fmt.Errorf("DELEGATION_VERIFY_BIN_PATH_POST_FORK: %s is not a regular file", postForkBinPath)
+	}
+	if binInfo.Mode().Perm()&0111 == 0 {
+		return fmt.Errorf("DELEGATION_VERIFY_BIN_PATH_POST_FORK: %s is not executable", postForkBinPath)
+	}
+	configInfo, err := os.Stat(postForkConfigPath)
+	if err != nil {
+		return fmt.Errorf("GENESIS_LEDGER_FILE_POST_FORK: cannot stat %s: %v", postForkConfigPath, err)
+	}
+	if !configInfo.Mode().IsRegular() {
+		return fmt.Errorf("GENESIS_LEDGER_FILE_POST_FORK: %s is not a regular file", postForkConfigPath)
+	}
+	return nil
 }
 
 var validStorageOptions = map[string]bool{
