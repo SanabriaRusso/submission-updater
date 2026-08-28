@@ -38,7 +38,7 @@ func TestRunCommand(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := runCommand(tc.command, tc.input)
+			got, _, err := runCommand(tc.command, tc.input)
 			if (err != nil) != tc.wantErr {
 				t.Errorf("runCommand(%q, %q) error = %v, wantErr %v", tc.command, tc.input, err, tc.wantErr)
 				return
@@ -47,5 +47,41 @@ func TestRunCommand(t *testing.T) {
 				t.Errorf("runCommand(%q, %q) = %q, want %q", tc.command, tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRunCommandCapturesStderr(t *testing.T) {
+	_, _, err := runCommand("sh -c echo_boom_and_fail", "")
+	if err == nil {
+		t.Fatal("expected an error for a missing command")
+	}
+
+	// The verifier reports why it gave up on stderr and signals what went wrong
+	// through the exit status; both have to survive into the returned error.
+	_, _, err = runCommand("sh -c", "")
+	if err == nil {
+		t.Fatal("expected an error when sh -c is given no script")
+	}
+	if !strings.Contains(err.Error(), "exit status") {
+		t.Errorf("error should carry the exit status, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sh:") && !strings.Contains(err.Error(), "option") {
+		t.Errorf("error should carry the stderr text, got: %v", err)
+	}
+}
+
+func TestBoundedBufferKeepsTail(t *testing.T) {
+	b := &boundedBuffer{max: 8}
+	if n, err := b.Write([]byte("0123456789abcdef")); n != 16 || err != nil {
+		t.Fatalf("Write returned (%d, %v), want (16, nil)", n, err)
+	}
+	if got := b.String(); got != "(truncated) ...89abcdef" {
+		t.Errorf("String() = %q, want the last 8 bytes marked truncated", got)
+	}
+
+	small := &boundedBuffer{max: 8}
+	small.Write([]byte("hi\n"))
+	if got := small.String(); got != "hi" {
+		t.Errorf("String() = %q, want %q unmarked", got, "hi")
 	}
 }
