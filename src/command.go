@@ -8,8 +8,12 @@ import (
 	"strings"
 )
 
-// Upper bound on how much of the verifier's stderr we retain.
-const maxCapturedStderr = 4096
+const (
+	// Upper bound on how much of a rejected record we echo into the log.
+	maxLoggedRecord = 512
+	// Upper bound on how much of the verifier's stderr we retain.
+	maxCapturedStderr = 4096
+)
 
 func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Submission, error) {
 	var cmd string
@@ -37,41 +41,70 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 		ctx.Log.Warnf("%v wrote to stderr: %s", command, stderr)
 	}
 
-	submissions, err := parseDelegationVerifyOutput(out)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing submissions: %w", err)
+	submissions, malformed := parseDelegationVerifyOutput(out)
+
+	// A record we cannot parse costs us that one submission, never the rest of
+	// the batch: submissions come from unrelated nodes and must not be able to
+	// invalidate each other. A batch in which nothing parsed is a different
+	// matter - that is the verifier misbehaving, not one bad submitter.
+	for _, record := range malformed {
+		ctx.Log.Errorf("Skipping unparseable record: %s", truncateHead(record, maxLoggedRecord))
+	}
+	if len(malformed) > 0 {
+		ctx.Log.Errorf("Skipped %d unparseable record(s) out of %d returned by %v",
+			len(malformed), len(malformed)+len(submissions), command)
+	}
+	// We are only called with a non-empty batch, so coming back with nothing is a
+	// failure however it happened - a verifier that emitted nothing, or one whose
+	// output we no longer recognise - and must not pass for an empty batch.
+	if len(submissions) == 0 {
+		if len(malformed) > 0 {
+			return nil, fmt.Errorf("none of the %d records returned by %v could be parsed", len(malformed), command)
+		}
+		return nil, fmt.Errorf("%v returned no submission records", command)
 	}
 
 	return submissions, nil
 }
 
-// Output from the delegation verification binary is expected to be a newline-separated JSON array of Submission objects.
-// We parse this into a slice of Submission objects.
-func parseDelegationVerifyOutput(data string) ([]Submission, error) {
-	var submissions []Submission
-
-	// Split the input data into separate records based on newline.
-	records := strings.Split(data, "\n")
-
-	for _, record := range records {
+// Output from the delegation verification binary is expected to be newline-separated JSON
+// objects, one per submission. When run with --config-file the binary also writes log lines
+// to the same stream, so anything that is not a submission record is skipped quietly.
+// Records that look like submissions but fail to unmarshal are returned separately so the
+// caller can report them; they never abort the batch.
+func parseDelegationVerifyOutput(data string) (submissions []Submission, malformed []string) {
+	for _, record := range strings.Split(data, "\n") {
+		record = strings.TrimSpace(record)
 		if record == "" {
-			continue // Skip empty lines
+			continue
 		}
-		// skip all lines that do not have submitted_at_date, which indicates optput is a submission
-		// and not a log line (when using --config-file flag, the output will contain additional log lines as well)
-		if !strings.Contains(record, "submitted_at_date") {
+
+		// Not JSON at all. Usually a log line from the verifier, but a record cut
+		// short (the process died mid-write) also lands here, so anything naming
+		// the key we expect on a submission is reported rather than dropped.
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(record), &fields); err != nil {
+			if strings.Contains(record, "submitted_at_date") {
+				malformed = append(malformed, record)
+			}
+			continue
+		}
+		// JSON, but not a submission record. submitted_at_date is present on every
+		// submission we send and is echoed back by the verifier.
+		if _, ok := fields["submitted_at_date"]; !ok {
 			continue
 		}
 
 		var submission Submission
 		if err := json.Unmarshal([]byte(record), &submission); err != nil {
-			return nil, err // Return error if any record fails to unmarshal
+			malformed = append(malformed, record)
+			continue
 		}
 
 		submissions = append(submissions, submission)
 	}
 
-	return submissions, nil
+	return submissions, malformed
 }
 
 // runCommand returns the command's stdout and stderr. The verifier reports its
@@ -136,4 +169,12 @@ func (b *boundedBuffer) String() string {
 		return "(truncated) ..." + s
 	}
 	return s
+}
+
+// truncateHead keeps the first max bytes of s.
+func truncateHead(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "... (truncated)"
 }
