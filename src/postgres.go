@@ -59,17 +59,30 @@ func (ctx *AppContext) selectRangePostgres(startTime, endTime time.Time) ([]Subm
 func (ctx *AppContext) updateSubmissionsPostgres(submissions []Submission) error {
 	ctx.Log.Infof("Updating %d submissions", len(submissions))
 
-	for _, sub := range submissions {
-		// We nullify snark_work to keep the space usage low
-		query := `UPDATE submissions
+	// We nullify snark_work to keep the space usage low
+	const query = `UPDATE submissions
                   SET snark_work = NULL, state_hash = $1, parent = $2, height = $3, slot = $4, validation_error = $5, verified = $6
                   WHERE id = $7`
+
+	var failed int
+	var firstErr error
+	for _, sub := range submissions {
 		if _, err := ctx.PostgresSession.Exec(query,
 			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
 			sub.ID); err != nil {
-			ctx.Log.Errorf("Failed to update submission: %v", err)
-			return err
+			// Keep going: a row that will not write must not hold back the rows
+			// behind it, which belong to unrelated submitters.
+			ctx.Log.Errorf("Failed to update submission id=%s submitter=%s: %v", sub.ID, sub.Submitter, err)
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+	}
+
+	if failed > 0 {
+		return fmt.Errorf("failed to update %d of %d submissions, first error: %w", failed, len(submissions), firstErr)
 	}
 
 	ctx.Log.Infof("Submissions updated")
