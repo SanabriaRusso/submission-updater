@@ -328,7 +328,7 @@ func newTestAppContext(cutover time.Time, preBin, postBin string) *AppContext {
 	}
 }
 
-func TestRunDualDelegationVerify(t *testing.T) {
+func TestVerifySubmissionsDualMode(t *testing.T) {
 	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
 	preBin, preArgsFile := writeStubVerifier(t, dir, "delegation-verify-pre-fork", "pre-fork-stub")
@@ -342,9 +342,9 @@ func TestRunDualDelegationVerify(t *testing.T) {
 		{ID: "post-1", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(time.Hour), Submitter: "B62post1"},
 	}
 
-	verifiedSubmissions, err := appCtx.runDualDelegationVerify(submissions)
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
 	if err != nil {
-		t.Fatalf("runDualDelegationVerify() error = %v", err)
+		t.Fatalf("verifySubmissions() error = %v", err)
 	}
 
 	// each submission should be processed by exactly the right stub, and the
@@ -356,17 +356,17 @@ func TestRunDualDelegationVerify(t *testing.T) {
 		"post-1":     "post-fork-stub",
 	}
 	if len(verifiedSubmissions) != len(submissions) {
-		t.Fatalf("runDualDelegationVerify() returned %v submissions, want %v", len(verifiedSubmissions), len(submissions))
+		t.Fatalf("verifySubmissions() returned %v submissions, want %v", len(verifiedSubmissions), len(submissions))
 	}
 	seen := make(map[string]bool)
 	for _, sub := range verifiedSubmissions {
 		want, known := wantMarkers[sub.ID]
 		if !known {
-			t.Errorf("runDualDelegationVerify() returned unexpected submission %v", sub.ID)
+			t.Errorf("verifySubmissions() returned unexpected submission %v", sub.ID)
 			continue
 		}
 		if seen[sub.ID] {
-			t.Errorf("runDualDelegationVerify() returned submission %v more than once", sub.ID)
+			t.Errorf("verifySubmissions() returned submission %v more than once", sub.ID)
 		}
 		seen[sub.ID] = true
 		if sub.ValidationError != want {
@@ -379,7 +379,7 @@ func TestRunDualDelegationVerify(t *testing.T) {
 	assertStubArgs(t, postArgsFile, "stdin --config-file /config/post-fork-ledger.json")
 }
 
-func TestRunDualDelegationVerifySkipsEmptyPartition(t *testing.T) {
+func TestVerifySubmissionsSkipsEmptyPostForkPartition(t *testing.T) {
 	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
 	preBin, _ := writeStubVerifier(t, dir, "delegation-verify-pre-fork", "pre-fork-stub")
@@ -391,19 +391,19 @@ func TestRunDualDelegationVerifySkipsEmptyPartition(t *testing.T) {
 		{ID: "pre-1", SubmittedAtDate: "2026-09-02", SubmittedAt: cutover.Add(-time.Hour), Submitter: "B62pre1"},
 	}
 
-	verifiedSubmissions, err := appCtx.runDualDelegationVerify(submissions)
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
 	if err != nil {
-		t.Fatalf("runDualDelegationVerify() error = %v", err)
+		t.Fatalf("verifySubmissions() error = %v", err)
 	}
 	if len(verifiedSubmissions) != 1 || verifiedSubmissions[0].ValidationError != "pre-fork-stub" {
-		t.Errorf("runDualDelegationVerify() = %v, want single submission processed by pre-fork-stub", verifiedSubmissions)
+		t.Errorf("verifySubmissions() = %v, want single submission processed by pre-fork-stub", verifiedSubmissions)
 	}
 	if _, err := os.Stat(postArgsFile); !os.IsNotExist(err) {
 		t.Errorf("post-fork stub was invoked for an empty partition")
 	}
 }
 
-func TestRunDualDelegationVerifySkipsEmptyPreForkPartition(t *testing.T) {
+func TestVerifySubmissionsSkipsEmptyPreForkPartition(t *testing.T) {
 	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
 	preBin, preArgsFile := writeStubVerifier(t, dir, "delegation-verify-pre-fork", "pre-fork-stub")
@@ -415,12 +415,12 @@ func TestRunDualDelegationVerifySkipsEmptyPreForkPartition(t *testing.T) {
 		{ID: "post-1", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(time.Hour), Submitter: "B62post1"},
 	}
 
-	verifiedSubmissions, err := appCtx.runDualDelegationVerify(submissions)
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
 	if err != nil {
-		t.Fatalf("runDualDelegationVerify() error = %v", err)
+		t.Fatalf("verifySubmissions() error = %v", err)
 	}
 	if len(verifiedSubmissions) != 1 || verifiedSubmissions[0].ValidationError != "post-fork-stub" {
-		t.Errorf("runDualDelegationVerify() = %v, want single submission processed by post-fork-stub", verifiedSubmissions)
+		t.Errorf("verifySubmissions() = %v, want single submission processed by post-fork-stub", verifiedSubmissions)
 	}
 	if _, err := os.Stat(preArgsFile); !os.IsNotExist(err) {
 		t.Errorf("pre-fork stub was invoked for an empty partition")
@@ -435,5 +435,131 @@ func assertStubArgs(t *testing.T, argsFile, want string) {
 	}
 	if got := strings.TrimSpace(string(args)); got != want {
 		t.Errorf("stub invoked with args %q, want %q", got, want)
+	}
+}
+
+func TestVerifySubmissionsSingleMode(t *testing.T) {
+	// With no cutover configured, verifySubmissions is one run through the
+	// pre-fork binary with the pre-fork config, exactly as before.
+	dir := t.TempDir()
+	bin, argsFile := writeStubVerifier(t, dir, "delegation-verify", "single-mode-stub")
+	appCtx := &AppContext{
+		AppConfig: AppConfig{
+			DelegationVerifyBinPath: bin,
+			GenesisLedgerFile:       "/config/pre-fork-ledger.json",
+		},
+		Log: logging.Logger("test"),
+	}
+
+	submissions := []Submission{
+		{ID: "sub-1", SubmittedAtDate: "2026-08-27", SubmittedAt: time.Date(2026, 8, 27, 0, 0, 0, 0, time.UTC), Submitter: "B62single"},
+	}
+
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
+	if err != nil {
+		t.Fatalf("verifySubmissions() error = %v", err)
+	}
+	if len(verifiedSubmissions) != 1 || verifiedSubmissions[0].ValidationError != "single-mode-stub" {
+		t.Errorf("verifySubmissions() = %v, want single submission processed by single-mode-stub", verifiedSubmissions)
+	}
+	assertStubArgs(t, argsFile, "stdin --config-file /config/pre-fork-ledger.json")
+}
+
+// writeStubFailing creates a stub delegation-verify executable that drains
+// stdin, reports a failure on stderr, and exits non-zero.
+func writeStubFailing(t *testing.T, dir, name, message string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	script := fmt.Sprintf("#!/bin/sh\ncat > /dev/null\necho %q >&2\nexit 4\n", message)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("error writing failing stub %v: %v", name, err)
+	}
+	return path
+}
+
+func TestVerifySubmissionsBanksSuccessfulPartitionOnFailure(t *testing.T) {
+	// A failing partition must not discard the other partition's completed
+	// work: the successes are returned alongside an error naming the failure.
+	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	preBin, _ := writeStubVerifier(t, dir, "delegation-verify-pre-fork", "pre-fork-stub")
+	postBin := writeStubFailing(t, dir, "delegation-verify-post-fork", "post-fork boom")
+	appCtx := newTestAppContext(cutover, preBin, postBin)
+
+	submissions := []Submission{
+		{ID: "pre-1", SubmittedAtDate: "2026-09-02", SubmittedAt: cutover.Add(-time.Hour), Submitter: "B62pre1"},
+		{ID: "post-1", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(time.Hour), Submitter: "B62post1"},
+	}
+
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
+	if err == nil {
+		t.Fatal("expected an error from the failing post-fork partition")
+	}
+	if !strings.Contains(err.Error(), "post-fork:") {
+		t.Errorf("error should name the post-fork partition, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "pre-fork:") {
+		t.Errorf("error should not name the successful pre-fork partition, got: %v", err)
+	}
+	if len(verifiedSubmissions) != 1 || verifiedSubmissions[0].ID != "pre-1" || verifiedSubmissions[0].ValidationError != "pre-fork-stub" {
+		t.Errorf("verifySubmissions() = %v, want the pre-fork submission processed by pre-fork-stub", verifiedSubmissions)
+	}
+}
+
+func TestVerifySubmissionsReportsBothFailedPartitions(t *testing.T) {
+	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	preBin := writeStubFailing(t, dir, "delegation-verify-pre-fork", "pre-fork boom")
+	postBin := writeStubFailing(t, dir, "delegation-verify-post-fork", "post-fork boom")
+	appCtx := newTestAppContext(cutover, preBin, postBin)
+
+	submissions := []Submission{
+		{ID: "pre-1", SubmittedAtDate: "2026-09-02", SubmittedAt: cutover.Add(-time.Hour), Submitter: "B62pre1"},
+		{ID: "post-1", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(time.Hour), Submitter: "B62post1"},
+	}
+
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
+	if err == nil {
+		t.Fatal("expected an error when both partitions fail")
+	}
+	if !strings.Contains(err.Error(), "pre-fork:") || !strings.Contains(err.Error(), "post-fork:") {
+		t.Errorf("error should name both failed partitions, got: %v", err)
+	}
+	if len(verifiedSubmissions) != 0 {
+		t.Errorf("verifySubmissions() = %v, want no submissions when both partitions fail", verifiedSubmissions)
+	}
+}
+
+func TestVerifySubmissionsIsolatesMalformedRecordToItsPartition(t *testing.T) {
+	// A malformed record in one partition costs that one record, per the batch
+	// isolation semantics - never the rest of its partition, and never the
+	// other partition.
+	cutover := time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	preBin, _ := writeStubVerifier(t, dir, "delegation-verify-pre-fork", "pre-fork-stub")
+	postBin := writeStubPrinter(t,
+		`{"submitted_at_date":"2026-09-03","submitter":"B62post1","verified":true}`,
+		`{"submitted_at_date":12345}`,
+	)
+	appCtx := newTestAppContext(cutover, preBin, postBin)
+
+	submissions := []Submission{
+		{ID: "pre-1", SubmittedAtDate: "2026-09-02", SubmittedAt: cutover.Add(-time.Hour), Submitter: "B62pre1"},
+		{ID: "post-1", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(time.Hour), Submitter: "B62post1"},
+		{ID: "post-2", SubmittedAtDate: "2026-09-03", SubmittedAt: cutover.Add(2 * time.Hour), Submitter: "B62post2"},
+	}
+
+	verifiedSubmissions, err := appCtx.verifySubmissions(submissions)
+	if err != nil {
+		t.Fatalf("verifySubmissions() error = %v", err)
+	}
+	if len(verifiedSubmissions) != 2 {
+		t.Fatalf("verifySubmissions() returned %v submissions, want 2 (%+v)", len(verifiedSubmissions), verifiedSubmissions)
+	}
+	if verifiedSubmissions[0].ID != "pre-1" || verifiedSubmissions[0].ValidationError != "pre-fork-stub" {
+		t.Errorf("pre-fork partition was affected: %+v", verifiedSubmissions[0])
+	}
+	if verifiedSubmissions[1].Submitter != "B62post1" {
+		t.Errorf("surviving post-fork record = %+v, want submitter B62post1", verifiedSubmissions[1])
 	}
 }

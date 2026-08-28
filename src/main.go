@@ -54,33 +54,31 @@ func main() {
 		submissions = appCtx.addMissingBlocksFromS3(ctx, submissions, appCfg)
 
 		log.Info("Running delegation verification...")
-		var verifiedSubmissions []Submission
-		if appCfg.ForkCutoverTime != nil {
-			// Dual-verifier mode: route each submission to the pre- or
-			// post-fork binary based on its submitted_at timestamp
-			verifiedSubmissions, err = appCtx.runDualDelegationVerify(submissions)
+		verifiedSubmissions, verifyErr := appCtx.verifySubmissions(submissions)
+
+		// Bank whatever verified before acting on any verification error:
+		// updates are idempotent, and a scheduled runner advances its window
+		// rather than retrying it, so results not written now would never be
+		// written at all.
+		if len(verifiedSubmissions) > 0 {
+			// Update the submissions
+			err = appCtx.updateSubmissions(verifiedSubmissions)
 			if err != nil {
-				log.Fatalf("Error running command: %v", err)
+				log.Fatalf("Error updating submissions: %v", err)
 			}
-		} else {
-			// Run the delegation verification binary
-			verifiedSubmissions, err = appCtx.verifySubmissions(submissions, appCfg.DelegationVerifyBinPath, appCfg.GenesisLedgerFile)
-			if err != nil {
-				log.Fatalf("Error running command: %v", err)
+
+			for _, sub := range verifiedSubmissions {
+				if sub.ValidationError != "" || !sub.Verified {
+					log.Infof("[INVALID] Submitter: %s, Block hash: %s, Submitted at: %s, Validation error: %s, Verified: %v",
+						sub.Submitter, sub.BlockHash, sub.SubmittedAt, sub.ValidationError, sub.Verified)
+				}
 			}
 		}
 
-		// Update the submissions
-		err = appCtx.updateSubmissions(verifiedSubmissions)
-		if err != nil {
-			log.Fatalf("Error updating submissions: %v", err)
-		}
-
-		for _, sub := range verifiedSubmissions {
-			if sub.ValidationError != "" || !sub.Verified {
-				log.Infof("[INVALID] Submitter: %s, Block hash: %s, Submitted at: %s, Validation error: %s, Verified: %v",
-					sub.Submitter, sub.BlockHash, sub.SubmittedAt, sub.ValidationError, sub.Verified)
-			}
+		// Still exit non-zero on a verification failure so alerting fires,
+		// but only after any successful partition's results are written.
+		if verifyErr != nil {
+			log.Fatalf("Error running command: %v", verifyErr)
 		}
 	}
 }

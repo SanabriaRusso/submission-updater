@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -68,9 +69,51 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, configFile, input str
 	return submissions, nil
 }
 
-// verifySubmissions marshals the given submissions and runs them through the
+// verifySubmissions is the single entry point for verification: it routes the
+// batch through the delegation-verify binary - or, in dual-verifier mode, the
+// pre- and post-fork binaries by submitted_at timestamp - and returns whatever
+// verified. In dual mode a failing partition does not discard the other
+// partition's completed work: successes are accumulated and returned alongside
+// the joined error, so the caller can bank what verified before failing the run.
+func (ctx *AppContext) verifySubmissions(submissions []Submission) ([]Submission, error) {
+	cfg := ctx.AppConfig
+	if cfg.ForkCutoverTime == nil {
+		return ctx.verifyBatch(submissions, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+	}
+
+	preFork, postFork := partitionSubmissionsByCutover(submissions, *cfg.ForkCutoverTime)
+	ctx.Log.Infof("Dual-verifier mode (cutover %v): %v pre-fork submissions, %v post-fork submissions",
+		cfg.ForkCutoverTime.Format(time.RFC3339), len(preFork), len(postFork))
+
+	var verifiedSubmissions []Submission
+	var errs []error
+	if len(preFork) > 0 {
+		verified, err := ctx.verifyBatch(preFork, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("pre-fork: %w", err))
+		} else {
+			verifiedSubmissions = append(verifiedSubmissions, verified...)
+		}
+	} else {
+		ctx.Log.Info("No pre-fork submissions, skipping pre-fork verification run")
+	}
+	if len(postFork) > 0 {
+		verified, err := ctx.verifyBatch(postFork, cfg.DelegationVerifyBinPathPostFork, cfg.GenesisLedgerFilePostFork)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("post-fork: %w", err))
+		} else {
+			verifiedSubmissions = append(verifiedSubmissions, verified...)
+		}
+	} else {
+		ctx.Log.Info("No post-fork submissions, skipping post-fork verification run")
+	}
+
+	return verifiedSubmissions, errors.Join(errs...)
+}
+
+// verifyBatch marshals the given submissions and runs them through the
 // delegation verification binary at binPath with the given config file.
-func (ctx *AppContext) verifySubmissions(submissions []Submission, binPath, configFile string) ([]Submission, error) {
+func (ctx *AppContext) verifyBatch(submissions []Submission, binPath, configFile string) ([]Submission, error) {
 	submissionsJSON, err := json.Marshal(submissions)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling submissions to JSON: %w", err)
@@ -89,38 +132,6 @@ func partitionSubmissionsByCutover(submissions []Submission, cutover time.Time) 
 		}
 	}
 	return preFork, postFork
-}
-
-// runDualDelegationVerify partitions submissions at the fork cutover time and
-// runs each non-empty partition through its corresponding delegation-verify
-// binary (pre-fork or post-fork), returning the merged results.
-func (ctx *AppContext) runDualDelegationVerify(submissions []Submission) ([]Submission, error) {
-	cfg := ctx.AppConfig
-	preFork, postFork := partitionSubmissionsByCutover(submissions, *cfg.ForkCutoverTime)
-	ctx.Log.Infof("Dual-verifier mode (cutover %v): %v pre-fork submissions, %v post-fork submissions",
-		cfg.ForkCutoverTime.Format(time.RFC3339), len(preFork), len(postFork))
-
-	var verifiedSubmissions []Submission
-	if len(preFork) > 0 {
-		verified, err := ctx.verifySubmissions(preFork, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
-		if err != nil {
-			return nil, fmt.Errorf("error verifying pre-fork submissions: %w", err)
-		}
-		verifiedSubmissions = append(verifiedSubmissions, verified...)
-	} else {
-		ctx.Log.Info("No pre-fork submissions, skipping pre-fork verification run")
-	}
-	if len(postFork) > 0 {
-		verified, err := ctx.verifySubmissions(postFork, cfg.DelegationVerifyBinPathPostFork, cfg.GenesisLedgerFilePostFork)
-		if err != nil {
-			return nil, fmt.Errorf("error verifying post-fork submissions: %w", err)
-		}
-		verifiedSubmissions = append(verifiedSubmissions, verified...)
-	} else {
-		ctx.Log.Info("No post-fork submissions, skipping post-fork verification run")
-	}
-
-	return verifiedSubmissions, nil
 }
 
 // Output from the delegation verification binary is expected to be newline-separated JSON
