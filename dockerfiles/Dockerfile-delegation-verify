@@ -99,8 +99,15 @@ RUN mkdir -p ${HOME}/app
 # HACK: build without special cpu features to allow more people to run delegation verification tool
 # RUN ./scripts/zexe-standardize.sh
 
+# DUNE_PROFILE must be exported as an ENVIRONMENT variable, not only passed as
+# dune's --profile flag: mina's comptime layer (src/lib/comptime/gen.sh) reads
+# the env var and silently falls back to the "dev" profile when it is unset,
+# baking dev constraint constants (ledger_depth 10, txn capacity 3) into the
+# binary - a different circuit whose verification rejects every real block.
+# See MinaProtocol/mina#19294.
 RUN if [ -n "$MINA_BRANCH_POST_FORK" ]; then \
-    eval $(opam config env) \
+    export DUNE_PROFILE="${DUNE_PROFILE_POST_FORK}" \
+    && eval $(opam config env) \
     && dune build --profile=${DUNE_PROFILE_POST_FORK} \
     src/app/delegation_verify/delegation_verify.exe \
     && cp _build/default/src/app/delegation_verify/delegation_verify.exe ./delegation-verify \
