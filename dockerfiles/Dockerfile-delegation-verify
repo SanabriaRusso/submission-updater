@@ -70,7 +70,7 @@ ARG DUNE_PROFILE_POST_FORK=mainnet
 ARG MINA_BRANCH_POST_FORK=""
 
 # repo to checkout the branch from
-ARG MINA_REPO=https://github.com/SanabriaRusso/mina
+ARG MINA_REPO=https://github.com/MinaProtocol/mina
 
 # location of repo used for pins and external package commits
 ARG MINA_DIR=mina
