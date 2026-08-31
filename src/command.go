@@ -72,11 +72,14 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 }
 
 // sokMismatchError is the verifier's message for a snark-work sok-digest
-// mismatch. Daemons in the released fleet emit uptime snark work carrying the
-// default sok digest on the zkApp-segment path (MinaProtocol/mina#19299), a
-// check the production verifier did not enforce before Mesa, so the mismatch
-// can be tolerated explicitly via TOLERATE_SOK_MISMATCH until the daemon fix
-// (MinaProtocol/mina#19313) is deployed fleet-wide.
+// mismatch. The verifier has always enforced the binding; mainnet never saw
+// it fail only because pre-3.4.0 daemons never route uptime snark work
+// through the zkApp-segment path that stamps the default sok digest into the
+// statement (MinaProtocol/mina#19299) - a path the released Mesa daemons all
+// carry. The binding prevents fee/prover misattribution in the snark pool,
+// where work is paid; uptime snark work is never pooled or paid, so the
+// mismatch can be tolerated explicitly via TOLERATE_SOK_MISMATCH until the
+// daemon fix (MinaProtocol/mina#19313) is deployed fleet-wide.
 const sokMismatchError = "sok message digest does not match the sok message"
 
 // tolerateSokMismatches counts submissions failing only the sok-digest check
