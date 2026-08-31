@@ -3,10 +3,18 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+)
+
+const (
+	// Upper bound on how much of a rejected record we echo into the log.
+	maxLoggedRecord = 512
+	// Upper bound on how much of the verifier's stderr we retain.
+	maxCapturedStderr = 4096
 )
 
 func (ctx *AppContext) runDelegationVerifyCommand(command, configFile, input string) ([]Submission, error) {
@@ -26,22 +34,86 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, configFile, input str
 		cmd = fmt.Sprintf("%s --config-file %s", cmd, configFile)
 	}
 
-	out, err := runCommand(cmd, input)
+	out, stderr, err := runCommand(cmd, input)
 	if err != nil {
 		return nil, fmt.Errorf("error running %v: %w", command, err)
 	}
+	// Exit status 0 does not mean it had nothing to say.
+	if stderr != "" {
+		ctx.Log.Warnf("%v wrote to stderr: %s", command, stderr)
+	}
 
-	submissions, err := parseDelegationVerifyOutput(out)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing submissions: %w", err)
+	submissions, malformed := parseDelegationVerifyOutput(out)
+
+	// A record we cannot parse costs us that one submission, never the rest of
+	// the batch: submissions come from unrelated nodes and must not be able to
+	// invalidate each other. A batch in which nothing parsed is a different
+	// matter - that is the verifier misbehaving, not one bad submitter.
+	for _, record := range malformed {
+		ctx.Log.Errorf("Skipping unparseable record: %s", truncateHead(record, maxLoggedRecord))
+	}
+	if len(malformed) > 0 {
+		ctx.Log.Errorf("Skipped %d unparseable record(s) out of %d returned by %v",
+			len(malformed), len(malformed)+len(submissions), command)
+	}
+	// We are only called with a non-empty batch, so coming back with nothing is a
+	// failure however it happened - a verifier that emitted nothing, or one whose
+	// output we no longer recognise - and must not pass for an empty batch.
+	if len(submissions) == 0 {
+		if len(malformed) > 0 {
+			return nil, fmt.Errorf("none of the %d records returned by %v could be parsed", len(malformed), command)
+		}
+		return nil, fmt.Errorf("%v returned no submission records", command)
 	}
 
 	return submissions, nil
 }
 
-// verifySubmissions marshals the given submissions and runs them through the
+// verifySubmissions is the single entry point for verification: it routes the
+// batch through the delegation-verify binary - or, in dual-verifier mode, the
+// pre- and post-fork binaries by submitted_at timestamp - and returns whatever
+// verified. In dual mode a failing partition does not discard the other
+// partition's completed work: successes are accumulated and returned alongside
+// the joined error, so the caller can bank what verified before failing the run.
+func (ctx *AppContext) verifySubmissions(submissions []Submission) ([]Submission, error) {
+	cfg := ctx.AppConfig
+	if cfg.ForkCutoverTime == nil {
+		return ctx.verifyBatch(submissions, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+	}
+
+	preFork, postFork := partitionSubmissionsByCutover(submissions, *cfg.ForkCutoverTime)
+	ctx.Log.Infof("Dual-verifier mode (cutover %v): %v pre-fork submissions, %v post-fork submissions",
+		cfg.ForkCutoverTime.Format(time.RFC3339), len(preFork), len(postFork))
+
+	var verifiedSubmissions []Submission
+	var errs []error
+	if len(preFork) > 0 {
+		verified, err := ctx.verifyBatch(preFork, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("pre-fork: %w", err))
+		} else {
+			verifiedSubmissions = append(verifiedSubmissions, verified...)
+		}
+	} else {
+		ctx.Log.Info("No pre-fork submissions, skipping pre-fork verification run")
+	}
+	if len(postFork) > 0 {
+		verified, err := ctx.verifyBatch(postFork, cfg.DelegationVerifyBinPathPostFork, cfg.GenesisLedgerFilePostFork)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("post-fork: %w", err))
+		} else {
+			verifiedSubmissions = append(verifiedSubmissions, verified...)
+		}
+	} else {
+		ctx.Log.Info("No post-fork submissions, skipping post-fork verification run")
+	}
+
+	return verifiedSubmissions, errors.Join(errs...)
+}
+
+// verifyBatch marshals the given submissions and runs them through the
 // delegation verification binary at binPath with the given config file.
-func (ctx *AppContext) verifySubmissions(submissions []Submission, binPath, configFile string) ([]Submission, error) {
+func (ctx *AppContext) verifyBatch(submissions []Submission, binPath, configFile string) ([]Submission, error) {
 	submissionsJSON, err := json.Marshal(submissions)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling submissions to JSON: %w", err)
@@ -62,81 +134,114 @@ func partitionSubmissionsByCutover(submissions []Submission, cutover time.Time) 
 	return preFork, postFork
 }
 
-// runDualDelegationVerify partitions submissions at the fork cutover time and
-// runs each non-empty partition through its corresponding delegation-verify
-// binary (pre-fork or post-fork), returning the merged results.
-func (ctx *AppContext) runDualDelegationVerify(submissions []Submission) ([]Submission, error) {
-	cfg := ctx.AppConfig
-	preFork, postFork := partitionSubmissionsByCutover(submissions, *cfg.ForkCutoverTime)
-	ctx.Log.Infof("Dual-verifier mode (cutover %v): %v pre-fork submissions, %v post-fork submissions",
-		cfg.ForkCutoverTime.Format(time.RFC3339), len(preFork), len(postFork))
-
-	var verifiedSubmissions []Submission
-	if len(preFork) > 0 {
-		verified, err := ctx.verifySubmissions(preFork, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
-		if err != nil {
-			return nil, fmt.Errorf("error verifying pre-fork submissions: %w", err)
-		}
-		verifiedSubmissions = append(verifiedSubmissions, verified...)
-	} else {
-		ctx.Log.Info("No pre-fork submissions, skipping pre-fork verification run")
-	}
-	if len(postFork) > 0 {
-		verified, err := ctx.verifySubmissions(postFork, cfg.DelegationVerifyBinPathPostFork, cfg.GenesisLedgerFilePostFork)
-		if err != nil {
-			return nil, fmt.Errorf("error verifying post-fork submissions: %w", err)
-		}
-		verifiedSubmissions = append(verifiedSubmissions, verified...)
-	} else {
-		ctx.Log.Info("No post-fork submissions, skipping post-fork verification run")
-	}
-
-	return verifiedSubmissions, nil
-}
-
-// Output from the delegation verification binary is expected to be a newline-separated JSON array of Submission objects.
-// We parse this into a slice of Submission objects.
-func parseDelegationVerifyOutput(data string) ([]Submission, error) {
-	var submissions []Submission
-
-	// Split the input data into separate records based on newline.
-	records := strings.Split(data, "\n")
-
-	for _, record := range records {
+// Output from the delegation verification binary is expected to be newline-separated JSON
+// objects, one per submission. When run with --config-file the binary also writes log lines
+// to the same stream, so anything that is not a submission record is skipped quietly.
+// Records that look like submissions but fail to unmarshal are returned separately so the
+// caller can report them; they never abort the batch.
+func parseDelegationVerifyOutput(data string) (submissions []Submission, malformed []string) {
+	for _, record := range strings.Split(data, "\n") {
+		record = strings.TrimSpace(record)
 		if record == "" {
-			continue // Skip empty lines
+			continue
 		}
-		// skip all lines that do not have submitted_at_date, which indicates optput is a submission
-		// and not a log line (when using --config-file flag, the output will contain additional log lines as well)
-		if !strings.Contains(record, "submitted_at_date") {
+
+		// Not JSON at all. Usually a log line from the verifier, but a record cut
+		// short (the process died mid-write) also lands here, so anything naming
+		// the key we expect on a submission is reported rather than dropped.
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(record), &fields); err != nil {
+			if strings.Contains(record, "submitted_at_date") {
+				malformed = append(malformed, record)
+			}
+			continue
+		}
+		// JSON, but not a submission record. submitted_at_date is present on every
+		// submission we send and is echoed back by the verifier.
+		if _, ok := fields["submitted_at_date"]; !ok {
 			continue
 		}
 
 		var submission Submission
 		if err := json.Unmarshal([]byte(record), &submission); err != nil {
-			return nil, err // Return error if any record fails to unmarshal
+			malformed = append(malformed, record)
+			continue
 		}
 
 		submissions = append(submissions, submission)
 	}
 
-	return submissions, nil
+	return submissions, malformed
 }
 
-func runCommand(command, input string) (string, error) {
+// runCommand returns the command's stdout and stderr. The verifier reports its
+// failures on stderr and exits with a distinct status per failure kind, so dropping
+// that stream leaves a bare exit code with no way to tell a bad config file from a
+// bad submission. Stderr is returned even on success, since exiting 0 does not mean
+// the command had nothing to report.
+func runCommand(command, input string) (stdout string, stderr string, err error) {
 	cmdParts := strings.Split(command, " ")
 	cmd := exec.Command(cmdParts[0], cmdParts[1:]...)
 
 	cmd.Stdin = bytes.NewBufferString(input)
 
-	// Run the command and capture its standard output.
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	var outBuf bytes.Buffer
+	errBuf := &boundedBuffer{max: maxCapturedStderr}
+	cmd.Stdout = &outBuf
+	cmd.Stderr = errBuf
 
-	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("failed to run command: %w", err)
+	// Return whatever was written even on failure. A verifier that dies partway
+	// through has already emitted complete records for the submissions it got to,
+	// and those belong to nodes that did nothing wrong.
+	if err := cmd.Run(); err != nil {
+		if msg := errBuf.String(); msg != "" {
+			return outBuf.String(), msg, fmt.Errorf("failed to run command: %w: %s", err, msg)
+		}
+		return outBuf.String(), "", fmt.Errorf("failed to run command: %w", err)
 	}
 
-	return stdout.String(), nil
+	return outBuf.String(), errBuf.String(), nil
+}
+
+// boundedBuffer keeps at most max bytes, dropping from the front. A command that
+// floods stderr over a long batch must not grow our memory without limit, and the
+// tail is the part worth keeping: the failure that made it give up is the last
+// thing it writes.
+type boundedBuffer struct {
+	max       int
+	buf       []byte
+	truncated bool
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	written := len(p)
+
+	if len(p) > b.max {
+		p = p[len(p)-b.max:]
+		b.truncated = true
+	}
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > b.max {
+		b.buf = b.buf[len(b.buf)-b.max:]
+		b.truncated = true
+	}
+
+	// Report the full length: a short write is an error to exec.Cmd.
+	return written, nil
+}
+
+func (b *boundedBuffer) String() string {
+	s := strings.TrimSpace(string(b.buf))
+	if s != "" && b.truncated {
+		return "(truncated) ..." + s
+	}
+	return s
+}
+
+// truncateHead keeps the first max bytes of s.
+func truncateHead(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "... (truncated)"
 }

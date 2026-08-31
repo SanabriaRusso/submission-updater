@@ -139,8 +139,14 @@ func (ctx *AppContext) selectRangeCassandra(startTime, endTime time.Time) ([]Sub
 	return submissions, nil
 }
 
-func (ctx *AppContext) tryUpdateSubmissionsCassandra(submissions []Submission) error {
+// tryUpdateSubmissionsCassandra attempts every submission and returns the ones that
+// failed, so a retry only repeats the failures instead of rewriting rows that already
+// landed. A row that will not write must not hold back the rows behind it, which
+// belong to unrelated submitters.
+func (ctx *AppContext) tryUpdateSubmissionsCassandra(submissions []Submission) ([]Submission, error) {
 	ctx.Log.Infof("Updating %d submissions", len(submissions))
+	var failed []Submission
+	var firstErr error
 	for _, sub := range submissions {
 		// Update the submission
 		// Note: raw_block and snark_work are reseted to nil since we don't want to keep them in the database
@@ -152,23 +158,48 @@ func (ctx *AppContext) tryUpdateSubmissionsCassandra(submissions []Submission) e
 			sub.StateHash, sub.Parent, sub.Height, sub.Slot, sub.ValidationError, sub.Verified,
 			nil, nil,
 			sub.SubmittedAtDate, sub.Shard, sub.SubmittedAt, sub.Submitter).Exec(); err != nil {
-			ctx.Log.Errorf("Failed to update submission: %v", err)
-			return err
+			ctx.Log.Errorf("Failed to update submission submitter=%s submitted_at=%v: %v",
+				sub.Submitter, sub.SubmittedAt, err)
+			failed = append(failed, sub)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 	}
-	ctx.Log.Infof("Submissions updated")
 
-	return nil
+	if len(failed) > 0 {
+		return failed, firstErr
+	}
+
+	ctx.Log.Infof("Submissions updated")
+	return nil, nil
 }
 
 func (ctx *AppContext) updateSubmissionsCassandra(submissions []Submission) error {
-	return ExponentialBackoff(func() error {
-		if err := ctx.tryUpdateSubmissionsCassandra(submissions); err != nil {
-			ctx.Log.Errorf("Error updating submissions (trying again): %v", err)
-			return err
+	remaining := submissions
+	backoff := initialBackoff
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(backoff)
+			backoff *= 2 // Exponential increase
 		}
-		return nil
-	}, maxRetries, initialBackoff)
+
+		var failed []Submission
+		failed, lastErr = ctx.tryUpdateSubmissionsCassandra(remaining)
+		if len(failed) == 0 {
+			return nil
+		}
+
+		ctx.Log.Errorf("%d of %d submissions failed to update (attempt %d/%d), trying again: %v",
+			len(failed), len(remaining), attempt+1, maxRetries, lastErr)
+		remaining = failed
+	}
+
+	return fmt.Errorf("failed to update %d submissions after %d retries, last error: %w",
+		len(remaining), maxRetries, lastErr)
 }
 
 func calculateDateRange(startTime, endTime time.Time) string {
