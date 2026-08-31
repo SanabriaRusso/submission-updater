@@ -66,6 +66,10 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, configFile, input str
 		return nil, fmt.Errorf("%v returned no submission records", command)
 	}
 
+	if ctx.AppConfig.TolerateSokMismatch {
+		submissions = ctx.tolerateSokMismatches(submissions)
+	}
+
 	return submissions, nil
 }
 
@@ -132,6 +136,37 @@ func partitionSubmissionsByCutover(submissions []Submission, cutover time.Time) 
 		}
 	}
 	return preFork, postFork
+}
+
+// sokMismatchError is the verifier's message for a snark-work sok-digest
+// mismatch. The verifier has always enforced the binding; mainnet never saw
+// it fail only because pre-3.4.0 daemons never route uptime snark work
+// through the zkApp-segment path that stamps the default sok digest into the
+// statement (MinaProtocol/mina#19299) - a path the released Mesa daemons all
+// carry. The binding prevents fee/prover misattribution in the snark pool,
+// where work is paid; uptime snark work is never pooled or paid, so the
+// mismatch can be tolerated explicitly via TOLERATE_SOK_MISMATCH until the
+// daemon fix (MinaProtocol/mina#19313) is deployed fleet-wide.
+const sokMismatchError = "sok message digest does not match the sok message"
+
+// tolerateSokMismatches counts submissions failing only the sok-digest check
+// as valid: the block proof itself has still verified, and the mismatch is a
+// known artifact of the released daemon fleet. Records with any other
+// validation error are left untouched.
+func (ctx *AppContext) tolerateSokMismatches(submissions []Submission) []Submission {
+	tolerated := 0
+	for i, submission := range submissions {
+		if !strings.Contains(submission.ValidationError, sokMismatchError) {
+			continue
+		}
+		ctx.Log.Infof("Tolerating sok-mismatch submission: submitter %s, block hash %s, original error: %s",
+			submission.Submitter, submission.BlockHash, submission.ValidationError)
+		submissions[i].Verified = true
+		submissions[i].ValidationError = ""
+		tolerated++
+	}
+	ctx.Log.Infof("Tolerated %d sok-mismatch submission(s) of %d", tolerated, len(submissions))
+	return submissions
 }
 
 // Output from the delegation verification binary is expected to be newline-separated JSON
