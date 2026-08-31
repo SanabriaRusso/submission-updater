@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const (
@@ -16,10 +17,26 @@ const (
 )
 
 func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Submission, error) {
-	var cmd string
+	cmd := ctx.buildVerifyCommand(command)
 
+	submissions, err := ctx.runVerifyPass(cmd, command, input)
+	if err != nil {
+		return nil, err
+	}
+
+	if ctx.AppConfig.TolerateSokMismatch {
+		submissions = ctx.retrySokMismatchesWithoutSnarkWork(cmd, command, input, submissions)
+	}
+
+	return submissions, nil
+}
+
+// buildVerifyCommand assembles the verifier invocation. The retry pass reuses
+// it so a re-verification always runs against the same binary, flags and
+// config file as the pass that produced the failure.
+func (ctx *AppContext) buildVerifyCommand(command string) string {
 	// Start building the command
-	cmd = fmt.Sprintf("%v stdin", command)
+	cmd := fmt.Sprintf("%v stdin", command)
 
 	// Add --no-checks flag if needed
 	if ctx.AppConfig.NoChecks {
@@ -32,6 +49,12 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 		cmd = fmt.Sprintf("%s --config-file %s", cmd, ctx.AppConfig.GenesisLedgerFile)
 	}
 
+	return cmd
+}
+
+// runVerifyPass runs one verifier invocation over input and returns the records
+// it emitted. command is the bare binary path, used for logging only.
+func (ctx *AppContext) runVerifyPass(cmd, command, input string) ([]Submission, error) {
 	out, stderr, err := runCommand(cmd, input)
 	if err != nil {
 		return nil, fmt.Errorf("error running %v: %w", command, err)
@@ -64,10 +87,6 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 		return nil, fmt.Errorf("%v returned no submission records", command)
 	}
 
-	if ctx.AppConfig.TolerateSokMismatch {
-		submissions = ctx.tolerateSokMismatches(submissions)
-	}
-
 	return submissions, nil
 }
 
@@ -78,27 +97,101 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 // statement (MinaProtocol/mina#19299) - a path the released Mesa daemons all
 // carry. The binding prevents fee/prover misattribution in the snark pool,
 // where work is paid; uptime snark work is never pooled or paid, so the
-// mismatch can be tolerated explicitly via TOLERATE_SOK_MISMATCH until the
-// daemon fix (MinaProtocol/mina#19313) is deployed fleet-wide.
+// mismatch can be waived via TOLERATE_SOK_MISMATCH until the daemon fix
+// (MinaProtocol/mina#19313) is deployed fleet-wide.
 const sokMismatchError = "sok message digest does not match the sok message"
 
-// tolerateSokMismatches counts submissions failing only the sok-digest check
-// as valid: the block proof itself has still verified, and the mismatch is a
-// known artifact of the released daemon fleet. Records with any other
-// validation error are left untouched.
-func (ctx *AppContext) tolerateSokMismatches(submissions []Submission) []Submission {
-	tolerated := 0
+// submissionKey identifies a submission across the verifier round trip. The
+// verifier echoes the fields it was given, so these two are carried both on the
+// batch we send and on the records we get back.
+func submissionKey(submission Submission) string {
+	return submission.SubmittedAt.UTC().Format(time.RFC3339Nano) + "|" + submission.Submitter
+}
+
+// retrySokMismatchesWithoutSnarkWork re-verifies submissions that failed only
+// the snark-work sok-digest check, this time with the snark work stripped.
+//
+// Marking the record verified in place is not enough: delegation_verify
+// short-circuits on the first error, so a sok-failed record comes back with no
+// state_hash, parent, height or slot. The coordinator awards a point only when
+// a submission's state_hash appears in its shortlist, and NULL state hashes are
+// dropped before that comparison - so a record marked verified but carrying an
+// empty payload still scores zero. Re-running the submission without snark work
+// makes the verifier skip the snark-work path entirely and verify the block on
+// its own, which produces a complete payload with a real state_hash. The block
+// proof is still verified in full; only the pooled-work binding is skipped.
+//
+// The retry reuses the command of the pass that failed, so in dual-verifier
+// deployments each partition retries against its own binary and config.
+func (ctx *AppContext) retrySokMismatchesWithoutSnarkWork(cmd, command, input string, submissions []Submission) []Submission {
+	failedIdx := make(map[string]int)
 	for i, submission := range submissions {
-		if !strings.Contains(submission.ValidationError, sokMismatchError) {
+		if strings.Contains(submission.ValidationError, sokMismatchError) {
+			failedIdx[submissionKey(submission)] = i
+		}
+	}
+	if len(failedIdx) == 0 {
+		return submissions
+	}
+
+	// The verifier echoes back what it was given, but not the block itself, so
+	// the retry batch has to be rebuilt from the submissions we sent.
+	var originals []Submission
+	if err := json.Unmarshal([]byte(input), &originals); err != nil {
+		ctx.Log.Errorf("Cannot retry %d sok-mismatch submission(s): unreadable verifier input: %v", len(failedIdx), err)
+		return submissions
+	}
+
+	var retryBatch []Submission
+	for _, original := range originals {
+		i, ok := failedIdx[submissionKey(original)]
+		if !ok {
 			continue
 		}
-		ctx.Log.Infof("Tolerating sok-mismatch submission: submitter %s, block hash %s, original error: %s",
-			submission.Submitter, submission.BlockHash, submission.ValidationError)
-		submissions[i].Verified = true
-		submissions[i].ValidationError = ""
-		tolerated++
+		ctx.Log.Infof("Re-verifying sok-mismatch submission without snark work: submitter %s, block hash %s, original error: %s",
+			submissions[i].Submitter, submissions[i].BlockHash, submissions[i].ValidationError)
+		// Without snark work the verifier takes its "nothing to check" branch
+		// for the snark-work statement and goes on to verify the block.
+		original.SnarkWork = nil
+		retryBatch = append(retryBatch, original)
 	}
-	ctx.Log.Infof("Tolerated %d sok-mismatch submission(s) of %d", tolerated, len(submissions))
+	if len(retryBatch) == 0 {
+		ctx.Log.Errorf("Cannot retry %d sok-mismatch submission(s): none matched the submissions sent to %v", len(failedIdx), command)
+		return submissions
+	}
+
+	retryJSON, err := json.Marshal(retryBatch)
+	if err != nil {
+		ctx.Log.Errorf("Cannot retry %d sok-mismatch submission(s): %v", len(retryBatch), err)
+		return submissions
+	}
+
+	// A failed retry costs only the retried records, which are already failing.
+	retried, err := ctx.runVerifyPass(cmd, command, string(retryJSON))
+	if err != nil {
+		ctx.Log.Errorf("Re-verification of %d sok-mismatch submission(s) failed, keeping the original results: %v", len(retryBatch), err)
+		return submissions
+	}
+
+	verified := 0
+	for _, record := range retried {
+		i, ok := failedIdx[submissionKey(record)]
+		if !ok {
+			ctx.Log.Errorf("Re-verification returned an unrecognised record for submitter %s, ignoring it", record.Submitter)
+			continue
+		}
+		// Keep the retried verdict either way: if it still fails, that failure
+		// is the accurate one, and it is no longer the sok check.
+		if record.ValidationError != "" || !record.Verified {
+			ctx.Log.Errorf("Submission from %s still fails without snark work: %s",
+				record.Submitter, record.ValidationError)
+		} else {
+			verified++
+		}
+		submissions[i] = record
+	}
+	ctx.Log.Infof("Re-verified %d sok-mismatch submission(s) without snark work; %d now verified", len(retryBatch), verified)
+
 	return submissions
 }
 
