@@ -261,3 +261,65 @@ func TestBoundedBufferKeepsTail(t *testing.T) {
 		t.Errorf("String() = %q, want %q unmarked", got, "hi")
 	}
 }
+
+const (
+	sokFailRecord   = `{"submitted_at_date":"2026-09-03","submitter":"A","block_hash":"hashA","verified":false,"validation_error":"sok message digest does not match the sok message"}`
+	cleanRecord     = `{"submitted_at_date":"2026-09-03","submitter":"B","block_hash":"hashB","verified":true}`
+	otherFailRecord = `{"submitted_at_date":"2026-09-03","submitter":"C","block_hash":"hashC","verified":false,"validation_error":"invalid block proof"}`
+)
+
+func TestRunDelegationVerifyCommandToleratesSokMismatch(t *testing.T) {
+	// With TOLERATE_SOK_MISMATCH on, a record failing only the sok-digest
+	// check is counted as valid; the clean record and the record failing for
+	// any other reason are untouched.
+	stub := writeStubVerifier(t, sokFailRecord, cleanRecord, otherFailRecord)
+
+	appCtx := testAppContext()
+	appCtx.AppConfig.TolerateSokMismatch = true
+
+	submissions, err := appCtx.runDelegationVerifyCommand(stub, "[]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(submissions) != 3 {
+		t.Fatalf("got %d submissions, want 3 (%+v)", len(submissions), submissions)
+	}
+	if !submissions[0].Verified || submissions[0].ValidationError != "" {
+		t.Errorf("sok-mismatch record should be tolerated, got verified=%v error=%q",
+			submissions[0].Verified, submissions[0].ValidationError)
+	}
+	if !submissions[1].Verified || submissions[1].ValidationError != "" {
+		t.Errorf("clean record should be untouched, got verified=%v error=%q",
+			submissions[1].Verified, submissions[1].ValidationError)
+	}
+	if submissions[2].Verified || submissions[2].ValidationError != "invalid block proof" {
+		t.Errorf("differently-failing record should be untouched, got verified=%v error=%q",
+			submissions[2].Verified, submissions[2].ValidationError)
+	}
+}
+
+func TestRunDelegationVerifyCommandKeepsSokMismatchWhenFlagOff(t *testing.T) {
+	// With the flag off, behavior is unchanged: the sok-mismatch record keeps
+	// its failure like any other.
+	stub := writeStubVerifier(t, sokFailRecord, cleanRecord, otherFailRecord)
+
+	submissions, err := testAppContext().runDelegationVerifyCommand(stub, "[]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(submissions) != 3 {
+		t.Fatalf("got %d submissions, want 3 (%+v)", len(submissions), submissions)
+	}
+	if submissions[0].Verified || !strings.Contains(submissions[0].ValidationError, sokMismatchError) {
+		t.Errorf("sok-mismatch record should keep its failure, got verified=%v error=%q",
+			submissions[0].Verified, submissions[0].ValidationError)
+	}
+	if !submissions[1].Verified || submissions[1].ValidationError != "" {
+		t.Errorf("clean record should be untouched, got verified=%v error=%q",
+			submissions[1].Verified, submissions[1].ValidationError)
+	}
+	if submissions[2].Verified || submissions[2].ValidationError != "invalid block proof" {
+		t.Errorf("differently-failing record should be untouched, got verified=%v error=%q",
+			submissions[2].Verified, submissions[2].ValidationError)
+	}
+}

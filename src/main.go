@@ -27,6 +27,9 @@ func main() {
 	log.Info("Submission Updater started...")
 	log.Info("Using SUBMISSION_STORAGE: ", appCfg.SubmissionStorage)
 	log.Infof("Using DELEGATION_VERIFY_BIN_PATH: %v", appCfg.DelegationVerifyBinPath)
+	if appCfg.TolerateSokMismatch {
+		log.Warn("TOLERATE_SOK_MISMATCH enabled: submissions failing only the snark-work sok-digest check are counted as valid; see MinaProtocol/mina#19299")
+	}
 
 	appCtx, err := NewAppContext(ctx, appCfg, log)
 	if err != nil {

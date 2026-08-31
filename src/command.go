@@ -64,7 +64,39 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 		return nil, fmt.Errorf("%v returned no submission records", command)
 	}
 
+	if ctx.AppConfig.TolerateSokMismatch {
+		submissions = ctx.tolerateSokMismatches(submissions)
+	}
+
 	return submissions, nil
+}
+
+// sokMismatchError is the verifier's message for a snark-work sok-digest
+// mismatch. Daemons in the released fleet emit uptime snark work carrying the
+// default sok digest on the zkApp-segment path (MinaProtocol/mina#19299), a
+// check the production verifier did not enforce before Mesa, so the mismatch
+// can be tolerated explicitly via TOLERATE_SOK_MISMATCH until the daemon fix
+// (MinaProtocol/mina#19313) is deployed fleet-wide.
+const sokMismatchError = "sok message digest does not match the sok message"
+
+// tolerateSokMismatches counts submissions failing only the sok-digest check
+// as valid: the block proof itself has still verified, and the mismatch is a
+// known artifact of the released daemon fleet. Records with any other
+// validation error are left untouched.
+func (ctx *AppContext) tolerateSokMismatches(submissions []Submission) []Submission {
+	tolerated := 0
+	for i, submission := range submissions {
+		if !strings.Contains(submission.ValidationError, sokMismatchError) {
+			continue
+		}
+		ctx.Log.Infof("Tolerating sok-mismatch submission: submitter %s, block hash %s, original error: %s",
+			submission.Submitter, submission.BlockHash, submission.ValidationError)
+		submissions[i].Verified = true
+		submissions[i].ValidationError = ""
+		tolerated++
+	}
+	ctx.Log.Infof("Tolerated %d sok-mismatch submission(s) of %d", tolerated, len(submissions))
+	return submissions
 }
 
 // Output from the delegation verification binary is expected to be newline-separated JSON

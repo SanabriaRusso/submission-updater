@@ -17,6 +17,7 @@ $ make
 
   - `DELEGATION_VERIFY_BIN_PATH` - path to [Stateless verifier tool](https://github.com/MinaProtocol/mina/tree/develop/src/app/delegation_verify) binary.
   - `NO_CHECKS` - if set to `1`, stateless verifier tool will run with `--no-checks` flag
+  - `TOLERATE_SOK_MISMATCH` - if set to `1`, submissions whose verification failure is the snark-work sok-digest check (`sok message digest does not match the sok message`) are counted as valid; the block proof itself must still verify, and submissions failing for any other reason are untouched. Daemons in the released fleet emit uptime snark work carrying the default sok digest on the zkApp-segment path ([MinaProtocol/mina#19299](https://github.com/MinaProtocol/mina/issues/19299)), and the production verifier never enforced this check before Mesa, so this flag restores the pre-Mesa enforcement semantics for the hard fork window. Temporary; remove after the daemon fleet carries [MinaProtocol/mina#19313](https://github.com/MinaProtocol/mina/pull/19313).
   - `SUBMISSION_STORAGE` - Storage where submissions are kept. Valid options: `POSTGRES` or `CASSANDRA`. Default: `POSTGRES`.
   - `GENESIS_LEDGER_FILE` - file path to genesis ledger file. This is input for stateless_verifier `--config-file` option. In principle it is optional, if set, stateless_verifier will be run with `--config-file GENESIS_LEDGER_FILE` option.
 
