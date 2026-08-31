@@ -180,8 +180,8 @@ ARG FORK_CUTOVER_TIME=""
 ENV DELEGATION_VERIFY_BIN_PATH=/bin/delegation-verify
 ENV DELEGATION_VERIFY_BIN_PATH_POST_FORK=/bin/delegation-verify-post-fork
 ENV SSL_CERTFILE=/root/.cassandra/sf-class2-root.crt
-ENV GENESIS_LEDGER_FILE=/root/genesis_ledgers/devnet.json
-ENV GENESIS_LEDGER_FILE_POST_FORK=/root/genesis_ledgers/devnet-post-fork.json
+ENV GENESIS_LEDGER_FILE=/root/genesis_ledgers/mainnet.json
+ENV GENESIS_LEDGER_FILE_POST_FORK=/root/genesis_ledgers/mainnet-post-fork.json
 ENV FORK_CUTOVER_TIME=${FORK_CUTOVER_TIME}
 # rehearsal: simulates the Sept-3 mainnet configuration (released daemons +
 # waiver); production would set this the same way
