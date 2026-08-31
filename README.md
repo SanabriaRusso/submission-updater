@@ -91,8 +91,10 @@ $ TAG=1.0 \
 For the Mina "Mesa" hard fork a single image can carry **two** `delegation-verify` binaries — the pre-fork one (built from `MINA_BRANCH`, exactly as before) and a post-fork one. The post-fork build is controlled by three optional env variables (threaded through as docker build args):
 
  - `MINA_BRANCH_POST_FORK` - branch (or tagged release) of [Mina](https://github.com/MinaProtocol/mina) to build the post-fork binary from. **Empty (the default) disables the post-fork build entirely** and the resulting image is identical to a single-binary build (plus an empty placeholder file at the post-fork binary path).
- - `DUNE_PROFILE_POST_FORK` - dune profile for the post-fork build (default `mainnet`).
+ - `DUNE_PROFILE_POST_FORK` - dune profile for the post-fork build. **Defaults to `DUNE_PROFILE`**, so both binaries in one image are built on the same profile unless you deliberately override it.
  - `FORK_CUTOVER_TIME` - RFC3339 timestamp of the hard fork, baked into the image as the `FORK_CUTOVER_TIME` env variable. Empty (the default) keeps dual mode off — the wrapper behaves exactly as today.
+
+Setting `FORK_CUTOVER_TIME` arms dual mode, so the build refuses to proceed unless the image can actually serve it: `MINA_BRANCH_POST_FORK` must be set, `genesis_ledgers/mainnet-post-fork.json` must exist, and the timestamp must parse (checked with GNU `date -d`; skipped on BSD/macOS `date`).
 
 The same three knobs are exposed as optional `workflow_dispatch` inputs of the Publish workflow (`mina_branch_post_fork`, `dune_profile_post_fork`, `fork_cutover_time`).
 
@@ -113,10 +115,11 @@ $ TAG=1.0 \
   DUNE_PROFILE=devnet \
   MINA_BRANCH=delegation_verify_over_stdin_rc_base \
   MINA_BRANCH_POST_FORK=mesa \
-  DUNE_PROFILE_POST_FORK=devnet \
   FORK_CUTOVER_TIME=2026-09-03T00:00:00Z \
   make docker-delegation-verify
 ```
+
+Both binaries above are built on the `devnet` profile: `DUNE_PROFILE_POST_FORK` is unset and therefore inherits `DUNE_PROFILE`.
 
 **Run**:
 

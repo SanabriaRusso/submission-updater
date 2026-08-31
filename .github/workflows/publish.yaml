@@ -23,9 +23,9 @@ on:
         required: false
         default: ''
       dune_profile_post_fork:
-        description: 'Dune profile to build the post-hard-fork binary with'
+        description: 'Dune profile to build the post-hard-fork binary with (empty = same as dune_profile)'
         required: false
-        default: 'mainnet'
+        default: ''
       fork_cutover_time:
         description: 'RFC3339 hard-fork cutover time baked into the image (empty = dual mode off)'
         required: false
@@ -89,9 +89,10 @@ jobs:
           TAG=${{ env.TAG }}
           MINA_BRANCH=${{ env.MINA_BRANCH }}
           DUNE_PROFILE=${{ env.DUNE_PROFILE }}
-          MINA_BRANCH_POST_FORK=${{ env.MINA_BRANCH_POST_FORK }}
-          DUNE_PROFILE_POST_FORK=${{ env.DUNE_PROFILE_POST_FORK }}
-          FORK_CUTOVER_TIME=${{ env.FORK_CUTOVER_TIME }}
+          # MINA_BRANCH_POST_FORK, DUNE_PROFILE_POST_FORK and FORK_CUTOVER_TIME
+          # reach build.sh through the workflow-level env: map above; they are
+          # deliberately not re-assigned here (free-text values containing spaces
+          # would not survive being spliced unquoted into this block).
           IMAGE_NAME=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}
           nix-shell --run "make docker-delegation-verify"
       - name: 🚚 Push Docker Image

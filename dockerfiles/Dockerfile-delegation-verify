@@ -6,8 +6,13 @@
 
 # Builder image
 # publish date: 2025-09-03
-# gcloud container images list-tags gcr.io/o1labs-192920/mina-toolchain --format=json --filter="digest=sha256:c810338e2c3973f7c674d0607048725917ce2be23b949c4bc9760c01122f884b"
-FROM gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792 AS builder
+# gcloud container images list-tags gcr.io/o1labs-192920/mina-toolchain --format=json --filter="digest=sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792"
+#
+# Declared in global scope (before the first FROM) so both builder stages share a
+# single pinned digest and cannot drift apart on the next toolchain bump.
+ARG MINA_TOOLCHAIN=gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792
+
+FROM ${MINA_TOOLCHAIN} AS builder
 
 # Use --build-arg "DUNE_PROFILE=dev" to build a dev image or for CI
 ARG DUNE_PROFILE=mainnet
@@ -60,7 +65,7 @@ RUN cp ./delegation-verify /bin/delegation-verify
 #   is produced instead so the runtime COPY always succeeds)
 #################################################################################################
 
-FROM gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792 AS builder-post-fork
+FROM ${MINA_TOOLCHAIN} AS builder-post-fork
 
 # Use --build-arg "DUNE_PROFILE_POST_FORK=dev" to build a dev image or for CI
 ARG DUNE_PROFILE_POST_FORK=mainnet
