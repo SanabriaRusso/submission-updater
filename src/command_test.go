@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -564,50 +566,197 @@ func TestVerifySubmissionsIsolatesMalformedRecordToItsPartition(t *testing.T) {
 	}
 }
 
+// Records the verifier emits on the first pass. The sok failure carries the
+// empty payload delegation_verify produces when it short-circuits on an error:
+// no state_hash, parent, height or slot.
 const (
-	sokFailRecord   = `{"submitted_at_date":"2026-09-03","submitter":"A","block_hash":"hashA","verified":false,"validation_error":"sok message digest does not match the sok message"}`
-	cleanRecord     = `{"submitted_at_date":"2026-09-03","submitter":"B","block_hash":"hashB","verified":true}`
-	otherFailRecord = `{"submitted_at_date":"2026-09-03","submitter":"C","block_hash":"hashC","verified":false,"validation_error":"invalid block proof"}`
+	sokFailRecord   = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62sok","block_hash":"hashSok","state_hash":"","verified":false,"validation_error":"sok message digest does not match the sok message"}`
+	cleanRecord     = `{"submitted_at":"2026-09-03T02:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62clean","block_hash":"hashClean","state_hash":"stateClean","verified":true}`
+	otherFailRecord = `{"submitted_at":"2026-09-03T03:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62other","block_hash":"hashOther","state_hash":"","verified":false,"validation_error":"invalid block proof"}`
+
+	// What the retry returns once the snark work is gone: the block verified on
+	// its own, so the payload is complete.
+	sokRetriedOKRecord = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62sok","block_hash":"hashSok","state_hash":"stateSok","parent":"parentSok","height":42,"slot":7,"verified":true}`
+	// A retry that fails for a reason of its own.
+	sokRetriedFailRecord = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62sok","block_hash":"hashSok","state_hash":"","verified":false,"validation_error":"invalid block proof"}`
 )
 
-func TestRunDelegationVerifyCommandToleratesSokMismatch(t *testing.T) {
-	// With TOLERATE_SOK_MISMATCH on, a record failing only the sok-digest
-	// check is counted as valid; the clean record and the record failing for
-	// any other reason are untouched.
-	stub := writeStubPrinter(t, sokFailRecord, cleanRecord, otherFailRecord)
+// sokTestBatch is the batch matching the records above: one submission that
+// fails the sok check, one clean, one failing for an unrelated reason.
+func sokTestBatch(t *testing.T) string {
+	t.Helper()
+	submissions := []Submission{
+		{SubmittedAt: time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC), Submitter: "B62sok", BlockHash: "hashSok", SnarkWork: []byte("snark")},
+		{SubmittedAt: time.Date(2026, 9, 3, 2, 0, 0, 0, time.UTC), Submitter: "B62clean", BlockHash: "hashClean", SnarkWork: []byte("snark")},
+		{SubmittedAt: time.Date(2026, 9, 3, 3, 0, 0, 0, time.UTC), Submitter: "B62other", BlockHash: "hashOther", SnarkWork: []byte("snark")},
+	}
+	batch, err := json.Marshal(submissions)
+	if err != nil {
+		t.Fatalf("marshaling test batch: %v", err)
+	}
+	return string(batch)
+}
+
+// writeStatefulStubVerifier creates a stub verifier that answers differently on
+// each invocation - the first pass emits firstLines, every later one emits
+// laterLines - and counts its invocations in a file so a test can tell whether
+// the retry pass ran at all.
+func writeStatefulStubVerifier(t *testing.T, firstLines, laterLines []string) (path string, countFile string, stdinPrefix string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path = filepath.Join(dir, "delegation-verify-stateful-stub")
+	countFile = filepath.Join(dir, "invocations")
+	stdinPrefix = filepath.Join(dir, "stdin.")
+
+	emit := func(lines []string) string {
+		out := ""
+		for _, line := range lines {
+			out += "cat <<'RECORD'\n" + line + "\nRECORD\n"
+		}
+		return out
+	}
+
+	script := "#!/bin/sh\n" +
+		"n=$(cat " + countFile + " 2>/dev/null || echo 0)\n" +
+		"n=$((n + 1))\n" +
+		"echo $n > " + countFile + "\n" +
+		"cat > " + stdinPrefix + "$n\n" +
+		"if [ \"$n\" -eq 1 ]; then\n" + emit(firstLines) +
+		"else\n" + emit(laterLines) + "fi\n"
+
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing stateful stub: %v", err)
+	}
+	return path, countFile, stdinPrefix
+}
+
+// stubStdin returns the batch the stub received on its nth invocation.
+func stubStdin(t *testing.T, stdinPrefix string, n int) string {
+	t.Helper()
+	data, err := os.ReadFile(stdinPrefix + strconv.Itoa(n))
+	if err != nil {
+		t.Fatalf("reading stub stdin for invocation %d: %v", n, err)
+	}
+	return string(data)
+}
+
+func stubInvocations(t *testing.T, countFile string) int {
+	t.Helper()
+	data, err := os.ReadFile(countFile)
+	if err != nil {
+		t.Fatalf("reading stub invocation count: %v", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("parsing stub invocation count %q: %v", data, err)
+	}
+	return n
+}
+
+func TestRunDelegationVerifyCommandRetriesSokMismatchWithoutSnarkWork(t *testing.T) {
+	// The point of the retry: a tolerated submission has to come back with a
+	// real payload. Marking the short-circuited record verified would leave
+	// state_hash empty, and the coordinator drops NULL state hashes before it
+	// awards points - so such a submission would score zero either way.
+	stub, countFile, stdinPrefix := writeStatefulStubVerifier(t,
+		[]string{sokFailRecord, cleanRecord, otherFailRecord},
+		[]string{sokRetriedOKRecord},
+	)
 
 	appCtx := testAppContext()
 	appCtx.AppConfig.TolerateSokMismatch = true
 
-	submissions, err := appCtx.runDelegationVerifyCommand(stub, "", "[]")
+	submissions, err := appCtx.runDelegationVerifyCommand(stub, "", sokTestBatch(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(submissions) != 3 {
 		t.Fatalf("got %d submissions, want 3 (%+v)", len(submissions), submissions)
 	}
-	if !submissions[0].Verified || submissions[0].ValidationError != "" {
-		t.Errorf("sok-mismatch record should be tolerated, got verified=%v error=%q",
-			submissions[0].Verified, submissions[0].ValidationError)
+	if got := stubInvocations(t, countFile); got != 2 {
+		t.Errorf("verifier invoked %d time(s), want 2 (first pass and retry)", got)
 	}
-	if !submissions[1].Verified || submissions[1].ValidationError != "" {
-		t.Errorf("clean record should be untouched, got verified=%v error=%q",
-			submissions[1].Verified, submissions[1].ValidationError)
+
+	// The retry must carry only the failing submission, with its snark work
+	// gone - that is what makes the verifier skip the snark-work path and
+	// produce a full payload.
+	retryBatch := stubStdin(t, stdinPrefix, 2)
+	if !strings.Contains(retryBatch, `"snark_work":null`) {
+		t.Errorf("retry batch should have snark work stripped, got %s", retryBatch)
+	}
+	if !strings.Contains(retryBatch, "B62sok") {
+		t.Errorf("retry batch should carry the failing submission, got %s", retryBatch)
+	}
+	if strings.Contains(retryBatch, "B62clean") || strings.Contains(retryBatch, "B62other") {
+		t.Errorf("retry batch should carry only the sok-failing submission, got %s", retryBatch)
+	}
+	if firstBatch := stubStdin(t, stdinPrefix, 1); !strings.Contains(firstBatch, `"snark_work":"`) {
+		t.Errorf("first pass should have sent the snark work, got %s", firstBatch)
+	}
+
+	retried := submissions[0]
+	if !retried.Verified || retried.ValidationError != "" {
+		t.Errorf("sok-mismatch record should verify on retry, got verified=%v error=%q",
+			retried.Verified, retried.ValidationError)
+	}
+	if retried.StateHash != "stateSok" {
+		t.Errorf("retried record must carry the payload the coordinator scores on, got state_hash=%q", retried.StateHash)
+	}
+	if retried.Parent != "parentSok" || retried.Height != 42 || retried.Slot != 7 {
+		t.Errorf("retried record lost payload fields: %+v", retried)
+	}
+
+	if !submissions[1].Verified || submissions[1].ValidationError != "" || submissions[1].StateHash != "stateClean" {
+		t.Errorf("clean record should be untouched, got %+v", submissions[1])
 	}
 	if submissions[2].Verified || submissions[2].ValidationError != "invalid block proof" {
-		t.Errorf("differently-failing record should be untouched, got verified=%v error=%q",
-			submissions[2].Verified, submissions[2].ValidationError)
+		t.Errorf("differently-failing record should be untouched, got %+v", submissions[2])
+	}
+}
+
+func TestRunDelegationVerifyCommandKeepsRetryFailure(t *testing.T) {
+	// A submission that still fails without its snark work is genuinely
+	// failing; the retried verdict is the accurate one and replaces the sok
+	// error.
+	stub, countFile, _ := writeStatefulStubVerifier(t,
+		[]string{sokFailRecord, cleanRecord, otherFailRecord},
+		[]string{sokRetriedFailRecord},
+	)
+
+	appCtx := testAppContext()
+	appCtx.AppConfig.TolerateSokMismatch = true
+
+	submissions, err := appCtx.runDelegationVerifyCommand(stub, "", sokTestBatch(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := stubInvocations(t, countFile); got != 2 {
+		t.Errorf("verifier invoked %d time(s), want 2", got)
+	}
+	if submissions[0].Verified || submissions[0].ValidationError != "invalid block proof" {
+		t.Errorf("retried record should carry its own failure, got verified=%v error=%q",
+			submissions[0].Verified, submissions[0].ValidationError)
+	}
+	if !submissions[1].Verified || submissions[2].Verified {
+		t.Errorf("other records should be untouched, got %+v and %+v", submissions[1], submissions[2])
 	}
 }
 
 func TestRunDelegationVerifyCommandKeepsSokMismatchWhenFlagOff(t *testing.T) {
-	// With the flag off, behavior is unchanged: the sok-mismatch record keeps
-	// its failure like any other.
-	stub := writeStubPrinter(t, sokFailRecord, cleanRecord, otherFailRecord)
+	// With the flag off there is no retry at all: the verifier runs once and
+	// the sok failure stands like any other.
+	stub, countFile, _ := writeStatefulStubVerifier(t,
+		[]string{sokFailRecord, cleanRecord, otherFailRecord},
+		[]string{sokRetriedOKRecord},
+	)
 
-	submissions, err := testAppContext().runDelegationVerifyCommand(stub, "", "[]")
+	submissions, err := testAppContext().runDelegationVerifyCommand(stub, "", sokTestBatch(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := stubInvocations(t, countFile); got != 1 {
+		t.Errorf("verifier invoked %d time(s), want 1 (no retry pass)", got)
 	}
 	if len(submissions) != 3 {
 		t.Fatalf("got %d submissions, want 3 (%+v)", len(submissions), submissions)
@@ -617,11 +766,32 @@ func TestRunDelegationVerifyCommandKeepsSokMismatchWhenFlagOff(t *testing.T) {
 			submissions[0].Verified, submissions[0].ValidationError)
 	}
 	if !submissions[1].Verified || submissions[1].ValidationError != "" {
-		t.Errorf("clean record should be untouched, got verified=%v error=%q",
-			submissions[1].Verified, submissions[1].ValidationError)
+		t.Errorf("clean record should be untouched, got %+v", submissions[1])
 	}
 	if submissions[2].Verified || submissions[2].ValidationError != "invalid block proof" {
-		t.Errorf("differently-failing record should be untouched, got verified=%v error=%q",
-			submissions[2].Verified, submissions[2].ValidationError)
+		t.Errorf("differently-failing record should be untouched, got %+v", submissions[2])
+	}
+}
+
+func TestRunDelegationVerifyCommandSkipsRetryWithoutSokMismatch(t *testing.T) {
+	// Nothing failed the sok check, so the flag changes nothing and no second
+	// invocation happens.
+	stub, countFile, _ := writeStatefulStubVerifier(t,
+		[]string{cleanRecord, otherFailRecord},
+		[]string{sokRetriedOKRecord},
+	)
+
+	appCtx := testAppContext()
+	appCtx.AppConfig.TolerateSokMismatch = true
+
+	submissions, err := appCtx.runDelegationVerifyCommand(stub, "", sokTestBatch(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := stubInvocations(t, countFile); got != 1 {
+		t.Errorf("verifier invoked %d time(s), want 1 (nothing to retry)", got)
+	}
+	if len(submissions) != 2 {
+		t.Errorf("got %d submissions, want 2 (%+v)", len(submissions), submissions)
 	}
 }
