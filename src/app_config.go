@@ -19,6 +19,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	// delegation_verify bin path
 	delegationVerifyBinPath := getEnvChecked("DELEGATION_VERIFY_BIN_PATH", log)
 	noChecks := boolEnvChecked("NO_CHECKS", log)
+	tolerateSokMismatch := boolEnvChecked("TOLERATE_SOK_MISMATCH", log)
 	networkName := getEnvChecked("NETWORK_NAME", log)
 	genesisLedgerFile := os.Getenv("GENESIS_LEDGER_FILE")
 
@@ -82,6 +83,7 @@ func LoadEnv(log logging.EventLogger) AppConfig {
 	config.NetworkName = networkName
 	config.DelegationVerifyBinPath = delegationVerifyBinPath
 	config.NoChecks = noChecks
+	config.TolerateSokMismatch = tolerateSokMismatch
 	config.GenesisLedgerFile = genesisLedgerFile
 	config.ForkCutoverTime = forkCutoverTime
 	config.DelegationVerifyBinPathPostFork = delegationVerifyBinPathPostFork
@@ -250,6 +252,7 @@ type AppConfig struct {
 	NetworkName             string `json:"network_name"`
 	DelegationVerifyBinPath string `json:"delegation_verify_bin_path"`
 	NoChecks                bool   `json:"no_checks"`
+	TolerateSokMismatch     bool   `json:"tolerate_sok_mismatch"`
 	GenesisLedgerFile       string `json:"genesis_ledger_file"`
 	// ForkCutoverTime enables dual-verifier mode when set: submissions with
 	// submitted_at >= ForkCutoverTime are verified with the post-fork binary,
