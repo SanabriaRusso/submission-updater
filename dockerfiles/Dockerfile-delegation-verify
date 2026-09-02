@@ -5,12 +5,18 @@
 #################################################################################################
 
 # Builder image
-# publish date: 2025-09-03
-# gcloud container images list-tags gcr.io/o1labs-192920/mina-toolchain --format=json --filter="digest=sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792"
+#
+# Source of truth for which toolchain to pin: buildkite/src/Constants/ContainerImages.dhall
+# in MinaProtocol/mina, field minaToolchainBullseye.amd64. That file pins this same
+# image at both refs we build from (3.5.0-mainnet-stop-slot and 4.0.0-mainnet-mesa);
+# the "-devnet" suffix is the toolchain's own build lineage, not a network constraint.
+#
+# Pinned by tag rather than by digest, on purpose: mina CI pins by tag here, and the
+# digest this used to carry was deleted upstream, which broke the build outright.
 #
 # Declared in global scope (before the first FROM) so both builder stages share a
-# single pinned digest and cannot drift apart on the next toolchain bump.
-ARG MINA_TOOLCHAIN=gcr.io/o1labs-192920/mina-toolchain@sha256:3b17e388d8974fdbe4bbd5f77315519763c78148a4c91434d9add62de87ab792
+# single toolchain and cannot drift apart on the next bump.
+ARG MINA_TOOLCHAIN=europe-west3-docker.pkg.dev/o1labs-192920/euro-docker-repo/mina-toolchain:f009c00-bullseye-devnet
 
 FROM ${MINA_TOOLCHAIN} AS builder
 
