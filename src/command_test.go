@@ -881,3 +881,140 @@ func TestRunDelegationVerifyCommandSkipsRetryWithoutSokMismatch(t *testing.T) {
 		t.Errorf("got %d submissions, want 2 (%+v)", len(submissions), submissions)
 	}
 }
+
+// Two rows a submitter produced at the same instant for the same block. This is
+// not hypothetical: on the mainnet corpus 338 of 5,585 rows over six hours (6.1%)
+// share a (submitted_at, submitter) pair, and in a live sink run 3 of 69
+// sok-failing rows sat in such a pair. Postgres gives these rows distinct ids;
+// Cassandra populates no id at all, so there they collapse onto one key.
+const (
+	dupFailRecord = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62dup","block_hash":"hashDup","state_hash":"","verified":false,"validation_error":"Transaction_snark.verify: Mismatched sok_message"}`
+	dupOKRecord   = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62dup","block_hash":"hashDup","state_hash":"stateDup","parent":"parentDup","height":9,"slot":3,"verified":true}`
+
+	dupFailRecordID1 = `{"id":"1","submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62dup","block_hash":"hashDup","state_hash":"","verified":false,"validation_error":"Transaction_snark.verify: Mismatched sok_message"}`
+	dupFailRecordID2 = `{"id":"2","submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62dup","block_hash":"hashDup","state_hash":"","verified":false,"validation_error":"Transaction_snark.verify: Mismatched sok_message"}`
+	dupOKRecordID1   = `{"id":"1","submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62dup","block_hash":"hashDup","state_hash":"stateDup","parent":"parentDup","height":9,"slot":3,"verified":true}`
+	dupOKRecordID2   = `{"id":"2","submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62dup","block_hash":"hashDup","state_hash":"stateDup","parent":"parentDup","height":9,"slot":3,"verified":true}`
+)
+
+func dupTestBatch(t *testing.T, ids []string) string {
+	t.Helper()
+	submissions := make([]Submission, 2)
+	for i := range submissions {
+		submissions[i] = Submission{
+			SubmittedAt: time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC),
+			Submitter:   "B62dup",
+			BlockHash:   "hashDup",
+			SnarkWork:   []byte("snark"),
+		}
+		if ids != nil {
+			submissions[i].ID = ids[i]
+		}
+	}
+	batch, err := json.Marshal(submissions)
+	if err != nil {
+		t.Fatalf("marshaling duplicate batch: %v", err)
+	}
+	return string(batch)
+}
+
+func TestRunDelegationVerifyCommandRecoversEveryDuplicateKeyedRow(t *testing.T) {
+	// Regression: keying the retry on (submitted_at, submitter) alone let the
+	// last duplicate win, so both recovered records overwrote one slot and the
+	// other row silently kept its failing verdict - while the log still counted
+	// it as recovered. Every failing row must come back, in both storage shapes.
+	testCases := []struct {
+		name       string
+		ids        []string
+		failFirst  []string
+		retryLater []string
+	}{
+		{
+			name:       "postgres rows carry distinct ids",
+			ids:        []string{"1", "2"},
+			failFirst:  []string{dupFailRecordID1, dupFailRecordID2},
+			retryLater: []string{dupOKRecordID1, dupOKRecordID2},
+		},
+		{
+			name:       "cassandra rows carry no id and collapse onto one key",
+			ids:        nil,
+			failFirst:  []string{dupFailRecord, dupFailRecord},
+			retryLater: []string{dupOKRecord, dupOKRecord},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub, countFile, _ := writeStatefulStubVerifier(t, tc.failFirst, tc.retryLater)
+
+			appCtx := testAppContext()
+			appCtx.AppConfig.TolerateSokMismatch = true
+
+			submissions, err := appCtx.runDelegationVerifyCommand(stub, "", dupTestBatch(t, tc.ids))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := stubInvocations(t, countFile); got != 2 {
+				t.Fatalf("verifier invoked %d time(s), want 2 (first pass and retry)", got)
+			}
+			if len(submissions) != 2 {
+				t.Fatalf("got %d submissions, want 2 (%+v)", len(submissions), submissions)
+			}
+			for i, submission := range submissions {
+				if !submission.Verified || submission.ValidationError != "" {
+					t.Errorf("row %d was not recovered: verified=%v error=%q",
+						i, submission.Verified, submission.ValidationError)
+				}
+				// The payload is the whole point: a verified row with an empty
+				// state_hash still scores zero.
+				if submission.StateHash != "stateDup" {
+					t.Errorf("row %d lost the payload the coordinator scores on: state_hash=%q",
+						i, submission.StateHash)
+				}
+			}
+		})
+	}
+}
+
+func TestSubmissionKeySeparatesRowsSharingSubmitterAndTime(t *testing.T) {
+	at := time.Date(2026, 9, 3, 1, 0, 0, 0, time.UTC)
+	first := Submission{ID: "1", SubmittedAt: at, Submitter: "B62dup"}
+	second := Submission{ID: "2", SubmittedAt: at, Submitter: "B62dup"}
+	if submissionKey(first) == submissionKey(second) {
+		t.Errorf("rows with distinct ids must not share a key, both are %q", submissionKey(first))
+	}
+
+	// Without an id there is nothing left to tell them apart, which is why the
+	// index has to treat a key as covering a group of rows.
+	noID := Submission{SubmittedAt: at, Submitter: "B62dup"}
+	alsoNoID := Submission{SubmittedAt: at, Submitter: "B62dup"}
+	if submissionKey(noID) != submissionKey(alsoNoID) {
+		t.Errorf("id-less rows should fall back to the same key, got %q and %q",
+			submissionKey(noID), submissionKey(alsoNoID))
+	}
+}
+
+func TestKeyedIndexHandsOutEachRowOnce(t *testing.T) {
+	index := newKeyedIndex()
+	index.add("k", 4)
+	index.add("k", 9)
+	index.add("other", 1)
+
+	if index.len() != 3 {
+		t.Errorf("len() = %d, want 3 (it counts rows, not keys)", index.len())
+	}
+	if i, ok := index.take("k"); !ok || i != 4 {
+		t.Errorf("first take(k) = (%d, %v), want (4, true)", i, ok)
+	}
+	if i, ok := index.take("k"); !ok || i != 9 {
+		t.Errorf("second take(k) = (%d, %v), want (9, true)", i, ok)
+	}
+	// A third record carrying the same key has no row left to claim; letting it
+	// through would overwrite a row that was already updated.
+	if _, ok := index.take("k"); ok {
+		t.Error("third take(k) should report exhaustion")
+	}
+	if _, ok := index.take("absent"); ok {
+		t.Error("take on an unknown key should report false")
+	}
+}
