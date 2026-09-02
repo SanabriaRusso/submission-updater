@@ -570,9 +570,13 @@ func TestVerifySubmissionsIsolatesMalformedRecordToItsPartition(t *testing.T) {
 // empty payload delegation_verify produces when it short-circuits on an error:
 // no state_hash, parent, height or slot.
 const (
-	sokFailRecord   = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62sok","block_hash":"hashSok","state_hash":"","verified":false,"validation_error":"sok message digest does not match the sok message"}`
-	cleanRecord     = `{"submitted_at":"2026-09-03T02:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62clean","block_hash":"hashClean","state_hash":"stateClean","verified":true}`
-	otherFailRecord = `{"submitted_at":"2026-09-03T03:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62other","block_hash":"hashOther","state_hash":"","verified":false,"validation_error":"invalid block proof"}`
+	// post-fork (4.0.0 Mesa): delegation_verify's explicit check
+	sokFailRecord = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62sok","block_hash":"hashSok","state_hash":"","verified":false,"validation_error":"proof's sok message digest does not match the sok message"}`
+	// pre-fork (Berkeley / 3.5.0 stop-slot): Transaction_snark.verify's
+	// internal check, reported with its own prefix and wording
+	sokFailRecordPreFork = `{"submitted_at":"2026-09-03T01:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62sok","block_hash":"hashSok","state_hash":"","verified":false,"validation_error":"Transaction_snark.verify: Mismatched sok_message"}`
+	cleanRecord          = `{"submitted_at":"2026-09-03T02:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62clean","block_hash":"hashClean","state_hash":"stateClean","verified":true}`
+	otherFailRecord      = `{"submitted_at":"2026-09-03T03:00:00Z","submitted_at_date":"2026-09-03","submitter":"B62other","block_hash":"hashOther","state_hash":"","verified":false,"validation_error":"invalid block proof"}`
 
 	// What the retry returns once the snark work is gone: the block verified on
 	// its own, so the payload is complete.
@@ -654,13 +658,79 @@ func stubInvocations(t *testing.T, countFile string) int {
 	return n
 }
 
+func TestIsSokMismatch(t *testing.T) {
+	// The check moved between eras, so the waiver has to recognise both
+	// spellings; anything else must stay untouched.
+	testCases := []struct {
+		name            string
+		validationError string
+		want            bool
+	}{
+		{
+			name:            "post-fork explicit check",
+			validationError: "proof's sok message digest does not match the sok message",
+			want:            true,
+		},
+		{
+			name:            "pre-fork Transaction_snark.verify check",
+			validationError: "Transaction_snark.verify: Mismatched sok_message",
+			want:            true,
+		},
+		{
+			name:            "pre-fork wording with trailing context",
+			validationError: "Transaction_snark.verify: Mismatched sok_message (statement 3)",
+			want:            true,
+		},
+		{
+			name:            "unrelated failure",
+			validationError: "invalid block proof",
+			want:            false,
+		},
+		{
+			name:            "no failure",
+			validationError: "",
+			want:            false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isSokMismatch(tc.validationError); got != tc.want {
+				t.Errorf("isSokMismatch(%q) = %v, want %v", tc.validationError, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunDelegationVerifyCommandRetriesSokMismatchWithoutSnarkWork(t *testing.T) {
 	// The point of the retry: a tolerated submission has to come back with a
 	// real payload. Marking the short-circuited record verified would leave
 	// state_hash empty, and the coordinator drops NULL state hashes before it
 	// awards points - so such a submission would score zero either way.
+	//
+	// Both era spellings have to travel this path: the pre-fork binaries in
+	// use on mainnet today report the mismatch from inside
+	// Transaction_snark.verify, the post-fork ones from delegation_verify.
+	testCases := []struct {
+		name       string
+		failRecord string
+	}{
+		{name: "post-fork wording", failRecord: sokFailRecord},
+		{name: "pre-fork wording", failRecord: sokFailRecordPreFork},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertSokMismatchRetried(t, tc.failRecord)
+		})
+	}
+}
+
+func assertSokMismatchRetried(t *testing.T, failRecord string) {
+	t.Helper()
+
 	stub, countFile, stdinPrefix := writeStatefulStubVerifier(t,
-		[]string{sokFailRecord, cleanRecord, otherFailRecord},
+		[]string{failRecord, cleanRecord, otherFailRecord},
 		[]string{sokRetriedOKRecord},
 	)
 
@@ -744,10 +814,26 @@ func TestRunDelegationVerifyCommandKeepsRetryFailure(t *testing.T) {
 }
 
 func TestRunDelegationVerifyCommandKeepsSokMismatchWhenFlagOff(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		failRecord string
+	}{
+		{name: "post-fork wording", failRecord: sokFailRecord},
+		{name: "pre-fork wording", failRecord: sokFailRecordPreFork},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertSokMismatchKeptWhenFlagOff(t, tc.failRecord)
+		})
+	}
+}
+
+func assertSokMismatchKeptWhenFlagOff(t *testing.T, failRecord string) {
+	t.Helper()
+
 	// With the flag off there is no retry at all: the verifier runs once and
 	// the sok failure stands like any other.
 	stub, countFile, _ := writeStatefulStubVerifier(t,
-		[]string{sokFailRecord, cleanRecord, otherFailRecord},
+		[]string{failRecord, cleanRecord, otherFailRecord},
 		[]string{sokRetriedOKRecord},
 	)
 
@@ -761,7 +847,7 @@ func TestRunDelegationVerifyCommandKeepsSokMismatchWhenFlagOff(t *testing.T) {
 	if len(submissions) != 3 {
 		t.Fatalf("got %d submissions, want 3 (%+v)", len(submissions), submissions)
 	}
-	if submissions[0].Verified || !strings.Contains(submissions[0].ValidationError, sokMismatchError) {
+	if submissions[0].Verified || !isSokMismatch(submissions[0].ValidationError) {
 		t.Errorf("sok-mismatch record should keep its failure, got verified=%v error=%q",
 			submissions[0].Verified, submissions[0].ValidationError)
 	}
