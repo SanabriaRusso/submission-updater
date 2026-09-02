@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -16,8 +17,8 @@ const (
 	maxCapturedStderr = 4096
 )
 
-func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Submission, error) {
-	cmd := ctx.buildVerifyCommand(command)
+func (ctx *AppContext) runDelegationVerifyCommand(command, configFile, input string) ([]Submission, error) {
+	cmd := ctx.buildVerifyCommand(command, configFile)
 
 	submissions, err := ctx.runVerifyPass(cmd, command, input)
 	if err != nil {
@@ -33,8 +34,9 @@ func (ctx *AppContext) runDelegationVerifyCommand(command, input string) ([]Subm
 
 // buildVerifyCommand assembles the verifier invocation. The retry pass reuses
 // it so a re-verification always runs against the same binary, flags and
-// config file as the pass that produced the failure.
-func (ctx *AppContext) buildVerifyCommand(command string) string {
+// config file as the pass that produced the failure - which in dual-verifier
+// mode differ per partition.
+func (ctx *AppContext) buildVerifyCommand(command, configFile string) string {
 	// Start building the command
 	cmd := fmt.Sprintf("%v stdin", command)
 
@@ -44,9 +46,9 @@ func (ctx *AppContext) buildVerifyCommand(command string) string {
 		cmd = fmt.Sprintf("%s --no-checks", cmd)
 	}
 
-	// Add --config-file flag if ConfigFile is specified
-	if ctx.AppConfig.GenesisLedgerFile != "" {
-		cmd = fmt.Sprintf("%s --config-file %s", cmd, ctx.AppConfig.GenesisLedgerFile)
+	// Add --config-file flag if configFile is specified
+	if configFile != "" {
+		cmd = fmt.Sprintf("%s --config-file %s", cmd, configFile)
 	}
 
 	return cmd
@@ -88,6 +90,71 @@ func (ctx *AppContext) runVerifyPass(cmd, command, input string) ([]Submission, 
 	}
 
 	return submissions, nil
+}
+
+// verifySubmissions is the single entry point for verification: it routes the
+// batch through the delegation-verify binary - or, in dual-verifier mode, the
+// pre- and post-fork binaries by submitted_at timestamp - and returns whatever
+// verified. In dual mode a failing partition does not discard the other
+// partition's completed work: successes are accumulated and returned alongside
+// the joined error, so the caller can bank what verified before failing the run.
+func (ctx *AppContext) verifySubmissions(submissions []Submission) ([]Submission, error) {
+	cfg := ctx.AppConfig
+	if cfg.ForkCutoverTime == nil {
+		return ctx.verifyBatch(submissions, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+	}
+
+	preFork, postFork := partitionSubmissionsByCutover(submissions, *cfg.ForkCutoverTime)
+	ctx.Log.Infof("Dual-verifier mode (cutover %v): %v pre-fork submissions, %v post-fork submissions",
+		cfg.ForkCutoverTime.Format(time.RFC3339), len(preFork), len(postFork))
+
+	var verifiedSubmissions []Submission
+	var errs []error
+	if len(preFork) > 0 {
+		verified, err := ctx.verifyBatch(preFork, cfg.DelegationVerifyBinPath, cfg.GenesisLedgerFile)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("pre-fork: %w", err))
+		} else {
+			verifiedSubmissions = append(verifiedSubmissions, verified...)
+		}
+	} else {
+		ctx.Log.Info("No pre-fork submissions, skipping pre-fork verification run")
+	}
+	if len(postFork) > 0 {
+		verified, err := ctx.verifyBatch(postFork, cfg.DelegationVerifyBinPathPostFork, cfg.GenesisLedgerFilePostFork)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("post-fork: %w", err))
+		} else {
+			verifiedSubmissions = append(verifiedSubmissions, verified...)
+		}
+	} else {
+		ctx.Log.Info("No post-fork submissions, skipping post-fork verification run")
+	}
+
+	return verifiedSubmissions, errors.Join(errs...)
+}
+
+// verifyBatch marshals the given submissions and runs them through the
+// delegation verification binary at binPath with the given config file.
+func (ctx *AppContext) verifyBatch(submissions []Submission, binPath, configFile string) ([]Submission, error) {
+	submissionsJSON, err := json.Marshal(submissions)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling submissions to JSON: %w", err)
+	}
+	return ctx.runDelegationVerifyCommand(binPath, configFile, string(submissionsJSON))
+}
+
+// partitionSubmissionsByCutover splits submissions into pre-fork (submitted_at
+// before the cutover) and post-fork (submitted_at at or after the cutover).
+func partitionSubmissionsByCutover(submissions []Submission, cutover time.Time) (preFork, postFork []Submission) {
+	for _, submission := range submissions {
+		if submission.SubmittedAt.Before(cutover) {
+			preFork = append(preFork, submission)
+		} else {
+			postFork = append(postFork, submission)
+		}
+	}
+	return preFork, postFork
 }
 
 // sokMismatchError is the verifier's message for a snark-work sok-digest
