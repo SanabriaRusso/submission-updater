@@ -157,16 +157,48 @@ func partitionSubmissionsByCutover(submissions []Submission, cutover time.Time) 
 	return preFork, postFork
 }
 
-// sokMismatchError is the verifier's message for a snark-work sok-digest
-// mismatch. The verifier has always enforced the binding; mainnet never saw
-// it fail only because pre-3.4.0 daemons never route uptime snark work
-// through the zkApp-segment path that stamps the default sok digest into the
-// statement (MinaProtocol/mina#19299) - a path the released Mesa daemons all
-// carry. The binding prevents fee/prover misattribution in the snark pool,
-// where work is paid; uptime snark work is never pooled or paid, so the
-// mismatch can be waived via TOLERATE_SOK_MISMATCH until the daemon fix
-// (MinaProtocol/mina#19313) is deployed fleet-wide.
-const sokMismatchError = "sok message digest does not match the sok message"
+// sokMismatchErrors are the verifier's messages for a snark-work sok-digest
+// mismatch. There are two spellings because the check lives in a different
+// place in each era, and a deployment spanning the hard fork sees both:
+//
+//   - Pre-fork binaries (Berkeley, and the 3.5.0 mainnet stop-slot release)
+//     do the comparison inside Transaction_snark.verify, which reports
+//     "Transaction_snark.verify: Mismatched sok_message" - underscored, and
+//     with no "digest" in it.
+//   - Post-fork binaries (4.0.0 Mesa) moved it to an explicit check in
+//     delegation_verify.ml, which reports "proof's sok message digest does
+//     not match the sok message".
+//
+// Matching only the post-fork wording would leave the waiver inert against
+// everything failing on mainnet today, and would still miss the pre-fork
+// partition after the fork.
+//
+// Daemons from 3.4.0 onward route uptime snark work through the zkApp-segment
+// path that stamps the default sok digest into the statement
+// (MinaProtocol/mina#19299); mainnet block producers are on 3.5.0 for the
+// stop slot, so the defect is live pre-fork as well. The binding prevents
+// fee/prover misattribution in the snark pool, where work is paid; uptime
+// snark work is never pooled or paid, so the mismatch can be waived via
+// TOLERATE_SOK_MISMATCH until the daemon fix (MinaProtocol/mina#19313) is
+// deployed fleet-wide.
+var sokMismatchErrors = []string{
+	// post-fork: delegation_verify's explicit check
+	"sok message digest does not match the sok message",
+	// pre-fork: Transaction_snark.verify's internal check
+	"Mismatched sok_message",
+}
+
+// isSokMismatch reports whether a validation error is a snark-work sok-digest
+// mismatch in either era's wording. The match is on a substring: the verifier
+// prefixes and decorates these messages with context.
+func isSokMismatch(validationError string) bool {
+	for _, candidate := range sokMismatchErrors {
+		if strings.Contains(validationError, candidate) {
+			return true
+		}
+	}
+	return false
+}
 
 // submissionKey identifies a submission across the verifier round trip. The
 // verifier echoes the fields it was given, so these two are carried both on the
@@ -193,7 +225,7 @@ func submissionKey(submission Submission) string {
 func (ctx *AppContext) retrySokMismatchesWithoutSnarkWork(cmd, command, input string, submissions []Submission) []Submission {
 	failedIdx := make(map[string]int)
 	for i, submission := range submissions {
-		if strings.Contains(submission.ValidationError, sokMismatchError) {
+		if isSokMismatch(submission.ValidationError) {
 			failedIdx[submissionKey(submission)] = i
 		}
 	}
